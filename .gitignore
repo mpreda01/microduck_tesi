@@ -1,1 +1,16 @@
 /microduck_rl
+/external/
+
+# heavy outputs (REPO_STRUCTURE.md, section 3)
+/models/
+/data/
+/runs/
+
+# Python, notebooks, editors
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+~$*

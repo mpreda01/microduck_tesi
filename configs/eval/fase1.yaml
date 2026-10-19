@@ -1,0 +1,34 @@
+# Phase 1 (work plan, section 5): benchmark of situations for the official policy.
+# Run with: python scripts/evaluate.py configs/eval/fase1.yaml
+# Command-line options override controllers, suite, episodes, recording and workers.
+inherit: ../sim.yaml
+
+phase: fase1
+controllers: [alpha_walking]      # names in configs/policies.yaml; add rough_walk_g for the plan's comparison
+suite: all                        # suite of configs/situations.yaml
+episodes_per_situation: 20
+seed: 0                           # episodes are paired: same draws for every controller
+
+# ---- per-step data (plan sections 4.8-4.9): data/steps/<run_id>/<controller>/<situation>.npz ----
+record:
+  steps: true
+  activations: true               # the three hidden layers in float16: most of the size
+
+workers: 0                        # parallel processes (0 = one per CPU core)
+log_every_s: 10.0                 # a progress line every N simulated seconds of each episode (0 = only the end)
+
+# ---- videos: first episode of the listed situations ([] = all) ----
+video:
+  enabled: true
+  every_n_steps: 2
+  width: 640
+  height: 480
+  situations: [flat, stairs_down_2.0cm, stairs_up_2.0cm, face_10deg_downhill, face_10deg_uphill, friction_0.2,
+               payload_30pct_com, payload_30pct_back, trans_down_10deg, trans_friction_0.15,
+               trans_payload_30pct_back]
+
+# ---- report (scripts/make_report.py): "measurably worse than the reference" ----
+report:
+  reference: flat
+  min_worse_groups: 3             # plan criterion: at least three situations
+  worse: {p_value: 0.01, min_vel_error_increase_m_s: 0.02, min_power_ratio: 1.10}
