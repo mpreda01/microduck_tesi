@@ -1,0 +1,69 @@
+policy,group,condition,falls,falls 95% CI (%),completed,vel err 1s (m/s),speed (m/s),yaw rate (rad/s),power (W),falls after event,vel err after event,com shift (mm),worse than flat
+rough_walk_g,reference,flat,0/20,0-16,20,0.175,0.126,0.039,1.381,,,,
+rough_walk_g,uneven,grid_0.3cm,0/20,0-16,20,0.174,0.127,0.031,1.351,,,,
+rough_walk_g,uneven,grid_0.6cm,0/20,0-16,20,0.176,0.124,0.046,1.408,,,,
+rough_walk_g,uneven,grid_0.9cm,1/20,1-24,19,0.19,0.111,0.045,1.399,,,,
+rough_walk_g,uneven,grid_1.2cm,6/20,15-52,14,0.191,0.11,0.063,1.498,,,,
+rough_walk_g,uneven,grid_1.5cm,5/20,11-47,15,0.178,0.123,0.049,1.414,,,,
+rough_walk_g,uneven,rubble_0.2cm,0/20,0-16,20,0.176,0.125,-0.029,1.201,,,,
+rough_walk_g,uneven,rubble_0.75cm,0/20,0-16,20,0.199,0.102,-0.024,1.159,,,,vel
+rough_walk_g,uneven,rubble_1.3cm,0/20,0-16,20,0.288,0.013,-0.053,1.019,,,,vel
+rough_walk_g,uneven,rubble_1.9cm,0/20,0-16,20,0.293,0.007,-0.026,1.052,,,,vel
+rough_walk_g,uneven,rubble_2.5cm,2/20,3-30,18,0.298,0.003,-0.041,1.184,,,,vel
+rough_walk_g,uneven,waves_0.5cm,0/20,0-16,20,0.172,0.129,-0.025,1.215,,,,
+rough_walk_g,uneven,waves_1.0cm,0/20,0-16,20,0.174,0.127,-0.027,1.201,,,,
+rough_walk_g,uneven,waves_1.5cm,0/20,0-16,20,0.179,0.122,-0.031,1.169,,,,
+rough_walk_g,uneven,waves_2.0cm,0/20,0-16,20,0.186,0.116,-0.04,1.157,,,,
+rough_walk_g,steps,stairs_down_1.0cm,0/20,0-16,20,0.179,0.123,0.182,1.469,,,,
+rough_walk_g,steps,stairs_up_1.0cm,0/20,0-16,20,0.276,0.025,0.007,1.361,,,,vel
+rough_walk_g,steps,stairs_down_1.5cm,1/20,1-24,19,0.14,0.168,0.1,1.892,,,,power
+rough_walk_g,steps,stairs_up_1.5cm,11/20,34-74,9,0.222,0.085,0.07,1.685,,,,"falls, vel, power"
+rough_walk_g,steps,stairs_down_2.0cm,12/20,39-78,8,0.124,0.226,0.033,3.293,,,,"falls, power"
+rough_walk_g,steps,stairs_up_2.0cm,20/20,84-100,0,,,,,,,,falls
+rough_walk_g,steps,stairs_down_2.5cm,20/20,84-100,0,,,,,,,,falls
+rough_walk_g,steps,stairs_up_2.5cm,20/20,84-100,0,,,,,,,,falls
+rough_walk_g,steps,stairs_down_3.0cm,20/20,84-100,0,,,,,,,,falls
+rough_walk_g,steps,stairs_up_3.0cm,20/20,84-100,0,,,,,,,,falls
+rough_walk_g,slope,pyramid_3.0deg,0/20,0-16,20,0.133,0.168,0.006,1.429,,,,
+rough_walk_g,slope,pyramid_5.0deg,0/20,0-16,20,0.114,0.187,0.012,1.558,,,,power
+rough_walk_g,slope,pyramid_7.0deg,0/20,0-16,20,0.099,0.215,0.012,2.175,,,,power
+rough_walk_g,slope,pyramid_9.0deg,2/20,3-30,18,0.128,0.249,0.027,3.221,,,,power
+rough_walk_g,slope,face_0deg_downhill,0/20,0-16,20,0.169,0.131,-0.006,1.258,,,,
+rough_walk_g,slope,face_0deg_uphill,0/20,0-16,20,0.169,0.131,-0.008,1.268,,,,
+rough_walk_g,slope,face_2.5deg_downhill,0/20,0-16,20,0.128,0.173,0.005,1.451,,,,
+rough_walk_g,slope,face_2.5deg_uphill,0/20,0-16,20,0.204,0.097,-0.025,1.129,,,,vel
+rough_walk_g,slope,face_5deg_downhill,0/20,0-16,20,0.099,0.202,0.017,1.619,,,,power
+rough_walk_g,slope,face_5deg_uphill,0/20,0-16,20,0.23,0.073,-0.03,1.03,,,,vel
+rough_walk_g,slope,face_7.5deg_downhill,0/20,0-16,20,0.068,0.267,0.007,3.344,,,,power
+rough_walk_g,slope,face_7.5deg_uphill,0/20,0-16,20,0.254,0.051,-0.038,0.934,,,,vel
+rough_walk_g,slope,face_10deg_downhill,3/20,5-36,17,0.218,0.515,-0.008,9.042,,,,"vel, power"
+rough_walk_g,slope,face_10deg_uphill,2/20,3-30,18,0.262,0.135,-0.14,2.929,,,,"vel, power"
+rough_walk_g,slope,face_12.5deg_downhill,20/20,84-100,0,,,,,,,,falls
+rough_walk_g,slope,face_12.5deg_uphill,2/20,3-30,18,0.34,-0.039,-0.005,0.99,,,,vel
+rough_walk_g,slope,face_15deg_downhill,20/20,84-100,0,,,,,,,,falls
+rough_walk_g,slope,face_15deg_uphill,16/20,58-92,4,0.489,-0.187,-0.008,3.351,,,,"falls, vel"
+rough_walk_g,friction,friction_0.6,0/20,0-16,20,0.178,0.123,0.052,1.377,,,,
+rough_walk_g,friction,friction_0.5,0/20,0-16,20,0.178,0.123,0.054,1.4,,,,
+rough_walk_g,friction,friction_0.4,0/20,0-16,20,0.172,0.128,0.037,1.372,,,,
+rough_walk_g,friction,friction_0.3,0/20,0-16,20,0.163,0.139,0.056,1.503,,,,
+rough_walk_g,friction,friction_0.2,0/20,0-16,20,0.19,0.11,0.001,1.902,,,,power
+rough_walk_g,friction,friction_0.1,2/20,3-30,18,0.321,-0.02,0.012,1.421,,,,vel
+rough_walk_g,payload,payload_10pct_com,0/20,0-16,20,0.169,0.131,0.03,1.435,,,"[0.0, 0.0, 0.0]",
+rough_walk_g,payload,payload_20pct_com,0/20,0-16,20,0.163,0.138,0.016,1.485,,,"[0.0, 0.0, 0.0]",
+rough_walk_g,payload,payload_30pct_com,0/20,0-16,20,0.161,0.139,0.011,1.51,,,"[0.0, 0.0, 0.0]",
+rough_walk_g,payload,payload_20pct_front,0/20,0-16,20,0.135,0.166,0.363,2.14,,,"[8.3, 0.0, 0.0]",power
+rough_walk_g,payload,payload_20pct_back,0/20,0-16,20,0.202,0.098,0.278,1.108,,,"[-8.3, 0.0, 0.0]",vel
+rough_walk_g,payload,payload_20pct_side,0/20,0-16,20,0.16,0.141,0.704,1.485,,,"[0.0, 8.3, 0.0]",
+rough_walk_g,payload,payload_20pct_up,0/20,0-16,20,0.18,0.121,0.003,1.379,,,"[0.0, 0.0, 13.3]",
+rough_walk_g,payload,payload_30pct_front,0/20,0-16,20,0.1,0.201,0.417,2.965,,,"[11.5, 0.0, 0.0]",power
+rough_walk_g,payload,payload_30pct_back,0/20,0-16,20,0.228,0.072,0.051,1.07,,,"[-11.5, 0.0, 0.0]",vel
+rough_walk_g,payload,payload_30pct_side,0/20,0-16,20,0.153,0.148,1.015,1.541,,,"[0.0, 11.5, 0.0]",power
+rough_walk_g,payload,payload_30pct_up,0/20,0-16,20,0.176,0.125,0.041,1.49,,,"[0.0, 0.0, 18.5]",
+rough_walk_g,transition,trans_down_5deg,0/20,0-16,20,0.149,0.152,-0.012,1.309,,,,
+rough_walk_g,transition,trans_up_5deg,16/20,58-92,4,0.198,0.106,0.005,1.186,,,,"falls, vel"
+rough_walk_g,transition,trans_down_10deg,0/20,0-16,20,0.167,0.173,-0.013,2.033,,,,power
+rough_walk_g,transition,trans_up_10deg,0/20,0-16,20,0.201,0.106,0.009,1.217,,,,vel
+rough_walk_g,transition,trans_friction_0.3,0/20,0-16,20,0.168,0.134,0.069,1.422,0,0.188,,
+rough_walk_g,transition,trans_friction_0.15,4/20,8-42,16,0.203,0.098,-0.006,1.321,4,0.211,,vel
+rough_walk_g,transition,trans_payload_30pct_com,0/20,0-16,20,0.165,0.135,0.012,1.468,0,0.198,"[0.0, 0.0, 0.0]",
+rough_walk_g,transition,trans_payload_30pct_back,0/20,0-16,20,0.22,0.081,0.052,1.126,0,0.253,"[-11.5, 0.0, 0.0]",vel
