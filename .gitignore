@@ -1,5 +1,7 @@
 /microduck_rl
 /external/
+/graphify-out
+/.claude
 
 # heavy outputs (REPO_STRUCTURE.md, section 3)
 /models/
