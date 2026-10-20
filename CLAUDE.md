@@ -6,23 +6,24 @@ Master's thesis: closed-loop adaptation of the Microduck's frozen walking policy
 
 1. **Before writing or changing any code, read [REPO_STRUCTURE.md](REPO_STRUCTURE.md).** It fixes where every piece of code goes, the Controller interface, the configs, the run and data formats and the naming conventions. New code goes in the file it assigns; if no file fits, decide where the code goes and record it there.
 2. **After writing or changing code, update [REPO_STRUCTURE.md](REPO_STRUCTURE.md) when needed:**
-   - the tree and the "Stato" paragraph (section 2) when files are added, removed or renamed;
-   - the file tables (sections 5-7) when what a file does changes;
-   - the config fields (section 4) and the `episodes.parquet` columns (section 8.3) when they change;
-   - the migration table (section 11) when a notebook part is migrated.
+   - the tree and the "Stato" paragraph (section 1) when files are added, removed or renamed;
+   - the config description (section 3) when YAML keys change;
+   - the module and script tables (sections 4-6) when what a file does changes;
+   - the formats and the `episodes.parquet` columns (section 7) when they change.
 3. **For any request about how to go on, a phase, an experiment or a method, read [docs/Piano_lavoro_tesi_Preda.md](docs/Piano_lavoro_tesi_Preda.md).** It defines the phases (section 5), with each one's product and criterion to go on, the metrics, and the method (section 3). It is long (about 900 lines): read the sections the request touches, using Grep on its headings.
 
 ## Map
 
 | Need | Where |
 |---|---|
-| Situations of the benchmark, suites | `configs/situations.yaml` (append new entries at the END: the index seeds the episodes) |
-| Simulator / episode parameters | `configs/sim.yaml`; one evaluation = `configs/eval/<phase>.yaml` (inherits sim.yaml) |
-| Policies / controllers by name | `configs/policies.yaml` → `src/steerduck/policies/registry.py` |
-| Simulation loop, any controller | `src/steerduck/sim/rollout.py` (terrains, scene, robot, conditions, metrics, recording, render alongside) |
-| Tables and phase criteria | `src/steerduck/analysis/aggregate.py`, called by `scripts/make_report.py` |
-| Entry points | `scripts/evaluate.py`, `scripts/preview_situations.py`, `scripts/make_report.py` |
-| Folders and run names | `src/steerduck/paths.py` only |
+| Situations of the benchmark, suites | `configs/situations.yaml`: blocks with `sweep` lists, expanded by `config.load_situations` |
+| Simulator and evaluation parameters | `configs/eval.yaml` (every parameter written there, no hidden defaults) |
+| Policies / controllers by name | `configs/policies.yaml` → `steerduck/policy.py` (`resolve`, `build_controller`) |
+| Terrains, MuJoCo model, robot, events | `steerduck/scene.py` |
+| Simulation loop, metrics, per-step data, video | `steerduck/rollout.py` |
+| Tables and phase criteria | `steerduck/report.py`, called by `scripts/report.py` |
+| Entry points | `scripts/evaluate.py` (also `--preview`), `scripts/report.py` |
+| Folders, runs, seeds | `steerduck/config.py` only |
 | Old phase 0 code, not migrated yet | `notebooks/fase_0.ipynb`, `notebooks/_build/eval_scenario.py` |
 | Upstream robot / training code | `microduck_rl/` (read-only: never modify it; the notebook pins commit `6cd45fc`) |
 
@@ -30,10 +31,11 @@ Do not read the large notebooks (`fase_0.ipynb` is 1.4 MB) whole. To look into o
 
 ## Writing code
 
-- **One place per operation.** Before writing a function, grep `src/steerduck` for an existing one. Scripts stay thin: parse args, load a config, call the library, write a run. Logic needed in two places goes in the library.
-- **Everything evaluated is a Controller** (`policies/controller.py`: `reset`, `act`, `activations`, `episode_diagnostics`) and is built only in `registry.py`. Evaluation, data collection and DAgger reuse `sim/rollout.py`; do not write a second simulation loop.
-- **Experiments are data:** a new experiment is a YAML file, not new code. Never hard-code paths, seeds or parameters that belong in `configs/`.
-- **Results:** a run is a new, immutable folder from `paths.new_run_dir`, with `config.yaml`, `run.json` (from `io.write_manifest`) and `log.txt`. Per-episode results go in `episodes.parquet`, per-step data in `data/steps/<run_id>/` as `.npz` + `fields.json`. Averages go in `analysis/`, never in the evaluation. Nothing in `results/` is written by hand.
+- **One place per operation.** Before writing a function, grep `steerduck/` for an existing one. Scripts stay thin: parse args, load a config, call the library, write a run. Logic needed in two places goes in the library.
+- **Write only the code that is needed, readable for a human review:** short functions with a docstring that says what and why, no speculative options, no stubs for later phases.
+- **Everything evaluated is a Controller** (`policy.py`: `reset`, `act`, `activations`, `episode_diagnostics`) and is built only in `build_controller`. Evaluation, data collection and DAgger reuse `rollout.py`; do not write a second simulation loop.
+- **Experiments are data:** a new experiment is a change in `configs/`, not new code. Values the user may want to vary go in the YAML as plain lists (e.g. a `sweep` list in situations.yaml), not in the code. Never hard-code paths, seeds or parameters.
+- **Results:** a run is a new, immutable folder from `config.new_run`, with `config.yaml`, `run.json` (`config.write_manifest`) and `log.txt`. Per-episode results go in `episodes.parquet`, per-step data in `data/<run_id>/` as `.npz` + `fields.json`. Averages go in `report.py`, never in the evaluation. Nothing in `results/` is written by hand.
 - **Style:** match the existing code. That means:
   - `from __future__ import annotations` at the top;
   - English docstrings and comments that say *why*, giving units in names (`_s`, `_m`, `_deg`, `_w`);
@@ -42,19 +44,18 @@ Do not read the large notebooks (`fase_0.ipynb` is 1.4 MB) whole. To look into o
   - `ValueError` / `FileNotFoundError` with a clear message for bad input;
   - heavy optional imports (torch, onnx, bam, imageio) inside the function that needs them.
 - **Names:** "situation" (not condition), "controller" (not policy) in code and data. Layers are `h1`, `h2`, `h3`. Situation names are snake_case and identical everywhere.
-- **Reproducibility:** the draws of an episode come from `np.random.default_rng([seed, situation_index, episode])` in a fixed order (start, battery voltage, joint noise). Changing that order or the seeding changes every result: do it only if the user asks, and say so.
-- Create only the files the current task needs, not stubs for later phases.
+- **Reproducibility:** terrain and episodes of a situation are seeded by `config.situation_seed(name, seed)`, from the name, so editing the YAML lists never changes other situations. The draws of an episode come from `np.random.default_rng([situation_seed, episode])` in a fixed order (start, battery voltage, joint noise). Changing that order or the seeding changes every result: do it only if the user asks, and say so.
 
 ## Running and checking
 
 - The simulator (mujoco, mjlab 1.3.0, bam) runs **on Colab**, inside microduck_rl's environment: `uv run --project external/microduck_rl --with-editable . python scripts/<script>.py ...` (setup in [README.md](README.md)). **It is not installed on this machine**, so simulation code cannot be run here: say so plainly, and never claim a simulation result you did not obtain.
 - Local checks that work:
   - `python -m py_compile` on the changed files;
-  - pure-Python logic (configs, situations, metrics, aggregation, make_report on a fake run) with Python 3.12 (`C:\Users\mpred\AppData\Local\Programs\Python\Python312\python.exe`), using a scratchpad venv with numpy/pandas/scipy/pyyaml/pyarrow, `PYTHONPATH=src`, and stub modules for `mujoco` / `mjlab`;
+  - pure-Python logic (situations, metrics, report on a fake run) with Python 3.12 (`C:\Users\mpred\AppData\Local\Programs\Python\Python312\python.exe`), using a scratchpad venv with numpy/pandas/scipy/pyyaml/pyarrow, `PYTHONPATH=.`, and stub modules for `mujoco` / `mjlab`;
   - set `STEERDUCK_STORAGE` to a scratchpad folder, so that test runs do not land in the repository.
 
   The default `python` on PATH is an MSYS Python 3.9 without packages.
-- Clean up what checks create in the repository (`__pycache__`, `results/tables` of a test).
+- Clean up what checks create in the repository (`__pycache__` of the new code, `results/tables` of a test). Never delete files tracked by git while cleaning up (`notebooks/_build/__pycache__` is tracked).
 
 ## Working with the user
 

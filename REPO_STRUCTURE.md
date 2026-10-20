@@ -55,7 +55,7 @@ tesi/
 
 Circa **16 file Python** in tutto. I moduli e gli script si creano quando serve la fase corrispondente, non prima.
 
-**Stato (19 ottobre 2026).** Dalla migrazione di `notebooks/fase_1.ipynb` esistono già: `configs/situations.yaml`, `policies.yaml`, i parametri di simulazione e valutazione, `config.py`, `scene.py`, `rollout.py`, `policy.py`, l'aggancio degli hook, `report.py`, `scripts/evaluate.py` e il test di equivalenza ONNX/PyTorch.
+**Stato (19 ottobre 2026).** Dalla migrazione di `notebooks/fase_1.ipynb` esistono: `configs/situations.yaml`, `policies.yaml`, `eval.yaml`; `steerduck/config.py`, `scene.py`, `rollout.py`, `policy.py` (che contiene anche gli hook che *leggono* le activation), `report.py`; `scripts/evaluate.py`, `scripts/report.py`; `tests/test_sanity.py` con il solo `test_policy_equivalence`. `training.yaml`, `steering.py`, `distill.py`, `interpret.py`, `recognizer.py`, `mjlab_tasks.py`, `train.py`, `convert.py` e gli altri due test arrivano con le fasi 2-6.
 
 ---
 
@@ -78,11 +78,12 @@ Circa **16 file Python** in tutto. I moduli e gli script si creano quando serve 
 
 ## 3. `configs/`: quattro file
 
-Nessuna sottocartella e nessuna ereditarietà tra file: i valori predefiniti stanno nel codice, il YAML elenca solo ciò che cambia. Ogni run salva la config completa che ha usato davvero.
+Nessuna sottocartella e nessuna ereditarietà tra file. Ogni parametro sta scritto nel YAML, non nascosto come valore predefinito nel codice. Ogni run salva la config completa che ha usato davvero.
 
-**`situations.yaml`** — elenco unico delle situazioni (le 68 della fase 1 più quelle che arriveranno). Ogni voce: `name` (usato ovunque, per esempio `slope_down_10deg`), `group` (`reference`, `uneven`, `steps`, `slope`, `friction`, `payload`, `transition`), `terrain`, `friction`, `payload`, `event` (cambio durante l'episodio con il suo istante), `episode_s` se diverso dal predefinito.
-La posizione nell'elenco fissa il seme: le situazioni nuove si aggiungono **in fondo**, così gli episodi di quelle esistenti non cambiano mai.
-In fondo al file ci sono le **suite**, cioè gruppi di situazioni usati insieme — un elenco di nomi oppure `{groups: [...]}`:
+**`situations.yaml`** — le situazioni, scritte per famiglie da modificare a mano. Ogni blocco ha un `name` con dei segnaposto (per esempio `face_{deg}deg_{direction}`), un `group` (`reference`, `uneven`, `steps`, `slope`, `friction`, `payload`, `transition`), il `terrain` con i suoi parametri e, sotto `sweep`, le **liste di valori**. Il blocco diventa una situazione per ogni combinazione delle liste. Cambiare le pendenze, gli attriti o i carichi vuol dire cambiare una lista, per esempio `sweep: {deg: [0, 2.5, 5, 7.5, 10, 12.5, 15], direction: [downhill, uphill]}`.
+Chiavi di una situazione: `terrain` con `height_cm`, `amplitude_cm`, `num_waves`, `deg`, `direction` secondo il tipo, e per la striscia delle transizioni `flat_before_m`, `slope_m`, `flat_after_m`. Poi `friction` (piedi **e** pavimento), il carico con `mass_pct` (% della massa del robot) e `offset` (un nome di `payload_offsets_m`, definiti in cima al file), l'evento con `event` (`friction` | `payload`), `event_t_s` e `friction_after`, e infine `episode_s` se diverso da `eval.yaml`.
+Il seme di terreno ed episodi dipende dal **nome** della situazione, non dalla sua posizione: modificare una lista non cambia mai gli episodi delle altre situazioni.
+In fondo al file ci sono le **suite**, cioè gruppi di situazioni usati insieme — un elenco di nomi oppure `{groups: [...]}`. Per ora esistono `flat`, `fixed`, `transitions` e `all` (implicita); le altre si aggiungono con le fasi che le usano:
 
 | Suite | Contenuto | Usata in |
 |---|---|---|
@@ -96,7 +97,7 @@ In fondo al file ci sono le **suite**, cioè gruppi di situazioni usati insieme 
 
 **`policies.yaml`** — il registro dei Controller: a ogni nome corrisponde un tipo (`onnx`, `mlp`, `adapter`, `system`, `switch`, `clae`, `residual`, `student`) e i file di `models/` da cui costruirlo. Gli script ricevono solo il nome (`--controller system`) e non conoscono mai un percorso.
 
-**`eval.yaml`** — simulatore e protocollo degli episodi, comuni a ogni valutazione: passo fisico, decimazione, motori bam, soglia di caduta, comando di velocità, tensione della batteria, warm-up, numero di episodi, semi, cosa registrare, criterio del report ("peggiore del riferimento"). Le opzioni da riga di comando lo sovrascrivono.
+**`eval.yaml`** — simulatore e protocollo degli episodi, comuni a ogni valutazione: passo fisico, decimazione, motori bam, soglia di caduta, dimensioni dei terreni, comando di velocità, heading hold, tensione della batteria, rumore iniziale, warm-up, suite, numero di episodi, semi, cosa registrare, video (per un elenco di situazioni, per tutte, oppure `one_per_family`: la prima situazione di ogni blocco di `situations.yaml`), criterio del report ("peggiore del riferimento"). Le opzioni da riga di comando di `evaluate.py` sovrascrivono suite, episodi, registrazione, video e processi.
 
 **`training.yaml`** — un file con quattro sezioni:
 - `ppo`: iperparametri comuni, task mjlab di partenza, checkpoint iniziale (`alpha` per il fine-tuning) e un blocco `overrides` con le sole situazioni che hanno bisogno di valori diversi. **Aggiungere una specialista non richiede un file nuovo:** basta il nome della situazione.
@@ -110,10 +111,10 @@ In fondo al file ci sono le **suite**, cioè gruppi di situazioni usati insieme 
 
 | Modulo | Cosa contiene |
 |---|---|
-| `config.py` | Caricamento dei YAML, percorsi canonici di `models/`, `data/`, `runs/`, `results/`, creazione della cartella di un run e del suo manifest, lettura e scrittura di Parquet, npz e JSON. Nessun altro file scrive percorsi a mano. |
+| `config.py` | Caricamento dei YAML ed espansione di `situations.yaml` in situazioni, selezione per suite, seme di una situazione, percorsi canonici di `models/`, `data/`, `runs/`, `results/`, creazione della cartella di un run, manifest `run.json`, logging. Nessun altro file scrive percorsi a mano. |
 | `scene.py` | Una voce di `situations.yaml` → un modello MuJoCo: terreno (compresi i due heightfield scritti per la tesi, piramide a facce piane e striscia piano → pendenza → piano), robot, carico, attrito di piedi **e** pavimento, motori bam. Tiene lo stato della situazione durante l'episodio e applica l'evento all'istante previsto. Espone le 61 osservazioni e lo stato misurato dal simulatore. |
 | `rollout.py` | Il ciclo di simulazione: esegue gli episodi di **qualsiasi** Controller, in parallelo su più processi, e restituisce una riga per episodio con tutte le metriche (errore di velocità, potenza, caduta entro 2 s, metriche dopo l'evento). Con la registrazione attiva salva anche ogni passo in `data/`; con il video attivo salva un mp4 e l'immagine della partenza. Lo usano la valutazione, la raccolta dei dataset e i cicli DAgger. |
-| `policy.py` | L'interfaccia Controller, il Controller ONNX, l'MLP 61 → 512 → 256 → 128 → 14 in PyTorch (con la normalizzazione degli input e i tre hidden layer esposti come `h1`, `h2`, `h3`), il caricamento da ONNX e da checkpoint rsl_rl, e `build_controller(nome)`, l'unico punto in cui i pezzi vengono assemblati. |
+| `policy.py` | L'interfaccia Controller (`reset`, `act`, `activations`, `episode_diagnostics`), il Controller ONNX, la ricostruzione in PyTorch del grafo ONNX (MLP 61 → 512 → 256 → 128 → 14 con la normalizzazione degli input) con gli hook che leggono i tre hidden layer `h1`, `h2`, `h3`, e il registro: `resolve(nome)` (scarica la policy se serve) e `build_controller`, l'unico punto in cui i pezzi vengono assemblati. Dalla fase 2 anche il caricamento da checkpoint rsl_rl. |
 | `steering.py` | I forward hook che leggono e modificano le activation; le quattro forme di adapter con **la stessa API** (`apply(h, α)`, layer di destinazione, limite di sicurezza): vettore costante, LoRA di rango 1, piccola rete, forma guidata dal SAE — con α = 0 ciascuna restituisce esattamente la policy originale. Più il router, che somma gli adapter pesati dal riconoscitore, li limita e non applica nulla quando il riconoscitore è incerto, nelle tre modalità `prob`, `oracle` e `switch`. |
 | `distill.py` | Il ciclo DAgger, generico rispetto a chi impara: dataset iniziale dalla specialista, ottimizzazione dei soli parametri dell'allievo, rollout dell'allievo, etichettatura con la specialista, ripetizione fino al criterio di stop. Addestra le quattro forme di adapter e la policy allievo con memoria. |
 | `interpret.py` | Il SAE (TopK/BatchTopK) e i probe lineari. Dà un nome agli elementi del dictionary confrontandoli con il ground truth, sceglie le feature rilevanti per ogni situazione, scompone un vettore costante negli elementi del dictionary, le estrae come input del riconoscitore. |
@@ -129,9 +130,9 @@ Ogni script legge una config, crea la cartella del run, chiama la libreria, salv
 
 | Comando | Cosa fa |
 |---|---|
-| `evaluate.py <controller>` | **Valutazione e raccolta dati, per tutti i metodi.** `--suite`, `--only`, `--episodes`, `--alpha` (prova di steering), `--record`, `--video`, `--preview` (solo l'immagine della partenza, per controllare a occhio i terreni), `--workers`. |
+| `evaluate.py <controller> [...]` | **Valutazione e raccolta dati, per tutti i metodi.** `--suite`, `--only`, `--episodes`, `--workers`, `--no-record`, `--no-activations`, `--no-video`, `--preview` (solo l'immagine della partenza, per controllare a occhio i terreni), `--name`. Dalla fase 3 `--alpha` (prova di steering). |
 | `train.py ppo\|distill\|sae\|recognizer` | **Tutto ciò che si addestra.** `ppo --situation <s>` per le specialiste, `ppo --baseline clae\|residual`; `distill --form const\|lora1\|smallnet\|sae_guided --layer h1\|h2\|h3\|all --situation <s>`, `distill --student`; `sae`; `recognizer --window 2`. Ogni training termina valutando il risultato nella propria situazione e sul piano. |
-| `report.py` | Rigenera **tutte** le tabelle e le figure di `results/`. `--phase`, `--all`. |
+| `report.py` | Rigenera **tutte** le tabelle e le figure di `results/`. `--phase`, `--run` (altrimenti i run di `results/runs_used.yaml`); più avanti `--all`. |
 | `convert.py` | `--import alpha.onnx` converte in PyTorch e verifica che su 10.000 input casuali la differenza massima sia sotto 10⁻⁵. In fase 6, `--export system` produce il grafo ONNX unico con policy, riconoscitore, router e libreria. |
 
 ### I comandi, fase per fase
@@ -139,7 +140,7 @@ Ogni script legge una config, crea la cartella del run, chiama la libreria, salv
 | Fase | Comandi |
 |---|---|
 | 0. Setup | `convert --import` · `evaluate alpha --suite card110` · `evaluate rough_walk_g --suite card110` · un `train ppo` breve per i tempi |
-| 1. Benchmark | `evaluate alpha --preview` · `evaluate alpha` · `evaluate rough_walk_g` · `report --phase 1` |
+| 1. Benchmark | `evaluate --preview` · `evaluate alpha_walking [rough_walk_g]` · `report --phase 1` |
 | 2. Specialiste | `train ppo --situation <s>` per ogni situazione · `evaluate specialist_<s> --record` |
 | 3. Libreria | `train sae` · `train distill --form … --layer …` · `evaluate alpha+<adapter> --alpha 0,…,1.5` |
 | 4. Sistema | `train recognizer` · `evaluate system` e `evaluate system_oracle --suite fixed,transitions,combined` |
@@ -182,14 +183,14 @@ Esempi: `runs/20261110-1430_train_ppo_specialist_slope_down/`, `runs/20261201-09
 | Dato | Formato | Dove |
 |---|---|---|
 | Risultati per episodio | Parquet | `runs/.../episodes.parquet` |
-| Passi registrati (osservazioni, activation in float16, azioni, ground truth, scenario) | npz compresso, un blocco per (controller, situazione), più un `fields.json` che descrive le colonne | `data/<run_id>/<controller>/<situazione>.npz` |
+| Passi registrati (osservazioni, activation in float16, azioni, ground truth, scenario) | npz compresso, un blocco per (controller, situazione, seme), più un `fields.json` che descrive le colonne | `data/<run_id>/<controller>/<situazione>__seed<seme>.npz` |
 | Modelli | `.pt` (state_dict) + `.json` di metadati (forma, layer, situazione, limite di sicurezza, run di origine); `.onnx` dove serve | nel run, poi in `models/` se promossi |
 | Tabelle finali | CSV + LaTeX | `results/tables/` |
 | Figure | PDF + PNG | `results/figures/` |
 
 ### `episodes.parquet`: una riga per episodio, colonne uguali per tutti i Controller
 
-`run_id` · `controller` · `situation`, `group`, `situation_index` · `seed`, `episode` · `outcome`, `duration_s`, `fall_time_s` · `vel_error_m_s`, `vel_error_1s_m_s` · `path_speed_m_s`, `yaw_rate_rad_s`, `power_w`, `max_tilt_deg`, `distance_m` · `fell_after_event`, `vel_error_after_event_m_s`, `power_after_event_w` · `start_x`, `start_y`, `end_x`, `end_y`, `heading_deg`, `vin_v` · `torch_onnx_max_diff` · `alpha`, `recog_accuracy`, `recog_delay`.
+`run_id` · `controller` · `situation`, `group` · `seed`, `episode` · `outcome`, `duration_s`, `fall_time_s` · `vel_error_m_s`, `vel_error_1s_m_s` · `path_speed_m_s`, `yaw_rate_rad_s`, `power_w`, `max_tilt_deg`, `distance_m` · `fell_after_event`, `vel_error_after_event_m_s`, `power_after_event_w` · `start_x`, `start_y`, `end_x`, `end_y`, `heading_deg`, `vin_v` · `torch_onnx_max_diff` · `alpha`, `recog_accuracy`, `recog_delay`.
 
 Medie, minimi, massimi e vantaggio recuperato **non** si calcolano qui ma in `report.py`: cambiare un'aggregazione non deve costare una nuova simulazione.
 
@@ -209,7 +210,7 @@ Medie, minimi, massimi e vantaggio recuperato **non** si calcolano qui ma in `re
 - **Situazioni:** minuscolo con underscore, identiche in `situations.yaml`, nelle cartelle di `data/` e nella colonna `situation`.
 - **Controller con adapter:** `<base>+<forma>_<layer>_<situazione>`, per esempio `alpha+lora1_h2_slippery`.
 - **Layer:** sempre `h1`, `h2`, `h3` (512, 256, 128 neuroni) oppure `all`.
-- **Semi:** elenco fisso in `eval.yaml`, uguale per tutti i metodi del confronto.
+- **Semi:** elenco fisso in `eval.yaml`, uguale per tutti i metodi del confronto. Il terreno e gli episodi di una situazione derivano da (nome della situazione, seme): ogni Controller riceve esattamente gli stessi episodi.
 - **Notebook:** solo per guardare dati e risultati. Importano `steerduck` e leggono da `runs/` o `results/`; nessun `%%writefile`. Una funzione che serve in due notebook va spostata nella libreria.
 
 ---

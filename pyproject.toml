@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Steering vectors distilled from specialist policies for the Microduck's walking (master's thesis)"
 requires-python = ">=3.12,<3.13"
 # mujoco, mjlab (1.3.0) and bam (better-actuator-models) come from the environment of microduck_rl:
-# the scripts run with `uv run --project external/microduck_rl --with-editable . python scripts/...`
+# the scripts run with `uv run --project external/microduck_rl --with-editable . python scripts/...`,
 # so that the simulator is exactly the one of the policy cards (see README.md).
 dependencies = [
     "numpy",
@@ -26,9 +26,8 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = ["steerduck"]
 
 [tool.ruff]
 line-length = 120
-src = ["src"]

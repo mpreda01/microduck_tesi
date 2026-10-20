@@ -1,0 +1,12 @@
+# The controllers by name (REPO_STRUCTURE.md, section 3). Scripts receive only the name.
+#   type  onnx: a policy file run with onnxruntime
+#   hf    [repo, file] on Hugging Face, downloaded once to models/<name>/
+#   path  or a file relative to models/
+
+alpha_walking:
+  type: onnx
+  hf: [pollen-robotics/microduck-policies, alpha_walking.onnx]
+
+rough_walk_g:
+  type: onnx
+  hf: [RemiFabre/microduck-rough-walk-g, policy.onnx]

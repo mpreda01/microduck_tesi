@@ -1,151 +1,292 @@
 # TO DO — Fase 2: policy specialiste
 
-*Documento di lavoro, 16 ottobre 2026. Riferimento: `Piano_lavoro_tesi_Preda.md`, sezione 5 (Fase 2) e sezioni 3.2, 3.6, 4.6-4.11.*
+*Matteo Preda — 20 ottobre 2026. Riferimenti: [Piano di lavoro](Piano_lavoro_tesi_Preda.md), sezione 3.2 (passi 1-2) e sezione 5 (Fase 2); [risultati della fase 1](RESULTS_fase1.md); [struttura della repository](../REPO_STRUCTURE.md).*
 
-## Obiettivo della fase (dal piano)
+## Obiettivo, prodotto e criterio
 
-Una **policy specialista** per ogni situazione selezionata nella fase 1, ottenuta con fine-tuning PPO di `alpha_walking`. Il lavoro si articola in tre passi:
-1. fine-tuning di `alpha_walking` in ciascuna situazione; se non basta, training da zero;
-2. valutazione di ogni specialista nella propria situazione e sul piano;
-3. registrazione dei dati: rollout di `alpha_walking` in tutte le situazioni (per probe, SAE e riconoscitore) e rollout di ciascuna specialista nella propria situazione (per la distillazione).
+- **Obiettivo:** una policy specialista per ogni situazione della libreria. Ognuna si ottiene con un fine-tuning di `alpha_walking` con PPO nella sola situazione, e cammina in quella situazione nettamente meglio della policy ufficiale.
+- **Prodotto:**
+  1. le specialiste (`.pt` + `.onnx`), promosse in `models/`;
+  2. la loro valutazione nella propria situazione e sul piano;
+  3. i dataset per le fasi 3-4:
+     - rollout di `alpha_walking` in tutte le situazioni (probe, SAE, riconoscitore);
+     - rollout di ogni specialista nella propria situazione (distillazione).
+- **Criterio per proseguire:** ogni specialista è nettamente migliore di `alpha_walking` nella propria situazione. Una situazione in cui la specialista non migliora esce dalla libreria, perché non c'è un comportamento migliore da distillare.
 
-**Prodotto:** specialiste e dataset.
-**Criterio per proseguire:** ogni specialista è nettamente migliore di `alpha_walking` nella propria situazione. Se non lo è, la situazione esce dalla libreria, perché non c'è un comportamento migliore da distillare.
+Il piano stima le settimane 5-7, con le specialiste addestrate in parallelo sui nodi di Faretra e su Moro43.
 
-## Punto di partenza (fasi 0 e 1)
+---
 
-- **Fase 0** (`notebooks/fase_0.ipynb`): la batteria su MuJoCo CPU con i servo BAM riproduce le schede (alpha 32/110, rough-walk-g 13/110; carta 32 e 12). La conversione ONNX → PyTorch è verificata, con differenza sotto 1e-5.
-- **Fase 1** (`notebooks/fase_1.ipynb`): 68 condizioni, 20 episodi ciascuna, run `bench_v1` di 32 minuti. Criterio soddisfatto: `alpha_walking` peggiora in 6 situazioni. Il notebook ora registra anche i dati per passo della sezione 4.8, nel formato della sezione 4.9.
+## 0. Prerequisiti da risolvere prima di tutto
 
-**Situazioni candidate per le specialiste**, dai risultati di `bench_v1`:
+### 0.1 Il checkpoint PyTorch di `alpha_walking` (bloccante)
 
-| Situazione | Dove `alpha_walking` peggiora | Note |
+Il fine-tuning con PPO riparte da un **checkpoint rsl_rl** (`model_XXXX.pt`), che contiene:
+- l'attore (la policy);
+- il **critic** (la rete che stima il valore, usata solo nel training);
+- la normalizzazione delle osservazioni;
+- lo stato dell'ottimizzatore.
+
+Su Hugging Face c'è solo l'ONNX, cioè solo l'attore. Secondo il manifest della scheda di `rough-walk-e`, il checkpoint di `alpha_walking` è il run W&B `yr25mna4`, `model_9999.pt`, che non è pubblico. `docs/velstand_policy.md` di microduck_rl cita invece il run `441tzs6d`: la discrepanza va chiarita.
+
+- [ ] **Chiedere a Pollen (Rémi Fabre) il checkpoint `.pt` di `alpha_walking`** e verificare quale dei due run è quello rilasciato. È la strada più semplice e più pulita.
+- [ ] Una volta ottenuto, verificare che il checkpoint esportato in ONNX coincida con `alpha_walking.onnx` di Hugging Face (stessa uscita su 10.000 input casuali, < 10⁻⁵). Altrimenti la specialista non partirebbe dalla policy valutata nella fase 1.
+- [ ] **Piano B, se il checkpoint non arriva:** ricostruire un checkpoint rsl_rl dall'ONNX:
+  1. copiare i pesi dell'attore e la normalizzazione degli input nell'`ActorCritic` di rsl_rl (la conversione ONNX → PyTorch di `steerduck/policy.py` già esiste);
+  2. inizializzare il critic da zero;
+  3. fare un **riscaldamento del critic**, cioè qualche centinaio di iterazioni PPO con l'attore congelato e solo il critic che impara, sul task piano;
+  4. solo dopo sbloccare l'attore.
+
+  Senza il riscaldamento, i primi aggiornamenti dell'attore usano vantaggi stimati da un critic casuale e possono rovinare la camminata. Va anche fissata la deviazione standard iniziale dell'azione (rumore di esplorazione), che l'ONNX non contiene: va scelta piccola, per non perturbare subito il passo.
+- [ ] **Piano C:** training da zero con microduck_rl. Il piano lo prevede come alternativa (circa 1 h su RTX 5090 sul piano, 5,5 h su terreno irregolare). Da evitare come scelta principale, perché la specialista sarebbe molto diversa da `alpha_walking` e il vettore della fase 3 avrebbe una distanza molto maggiore da colmare (sezione 3.2, passo 1).
+
+### 0.2 Stesso codice di microduck_rl per tutto
+
+- [ ] Usare **`6cd45fc`** (branch `hostile-terrain`) sia per il training sia per la valutazione: è il commit delle fasi 0-1, quello delle schede, e contiene i task `Mjlab-Hostile-*` usati per `rough-walk-g` ed `-e`.
+- [ ] **Rifare il run della fase 1 su `6cd45fc`.** Il run `20261020-0137` è stato fatto su `develop` (`273afe0`), come registrato nel suo `run.json`. Già che lo si rifà, usare più semi (`seeds: [0, 1, 2, 3, 4]` in `eval.yaml`) per avere più terreni casuali per situazione (vedi l'analisi dei risultati: le cadute su `rubble` e `grid` dipendono dal singolo terreno sorteggiato). Questo run diventa:
+  - il riferimento della fase 2 (`alpha_walking` nelle stesse situazioni e con gli stessi semi delle specialiste);
+  - il dataset di `alpha_walking` del punto 7.1.
+- [ ] Registrarlo in `results/runs_used.yaml` sotto `fase1`.
+
+### 0.3 Calcolo
+
+- [ ] Misurare il costo di un'iterazione di fine-tuning sulla RTX 3090 e sulla RTX 5090 di Moro43, con il numero di ambienti che si userà (4096). La fase 0 doveva misurarlo (passo 4): riprendere quel numero se c'è. Serve a dimensionare il budget e, nella fase 5, la metrica "costo di una situazione nuova".
+
+---
+
+## 1. Scegliere le situazioni della libreria
+
+Dalla fase 1 (sezione "Candidate per le policy specialiste" di [RESULTS_fase1.md](RESULTS_fase1.md)):
+
+| Situazione | Priorità | Perché | Nota |
+|---|---|---|---|
+| Discesa | alta | Peggioramento più netto (cadute da 5°); `rough-walk-g` regge fino a 9-10° | L'esempio guida del piano |
+| Gradini in discesa | alta | Cadute da 1,25-1,5 cm, potenza ×3-4 già a 1 cm; `rough-walk-g` scende senza cadere fino a 1,75 cm | |
+| Terreno irregolare (rubble, griglia) | alta | Cadute da 1,2 cm (griglia) e 1,5 cm (rubble) | Sul rubble ≥ 1,3 cm entrambe le policy restano ferme: la specialista deve migliorare anche la velocità, non solo le cadute |
+| Attrito basso | media | Soglia netta: 0,175 → 1/20, 0,15 → 20/20 cadute; `rough-walk-g` regge fino a 0,15 | |
+| Carico | da decidere | Sul baricentro nessuna caduta fino al 50%, solo potenza; spostato in avanti al 40-50% cade subito, prima di camminare (equilibrio statico) | Se si tiene, usare il carico in avanti tra 30 e 40% e il carico laterale, dove `rough-walk-g` gira su se stessa |
+| Salita (pendenze, gradini) | da decidere | Non cade ma si ferma; nemmeno `rough-walk-g` sale i gradini da 1,5 cm | Probabile limite fisico sui gradini; sulle pendenze la specialista potrebbe almeno avanzare |
+
+- [ ] Decidere la lista finale, **una specialista per famiglia**. Discesa e salita restano separate: sono comportamenti opposti e situazioni diverse per il riconoscitore.
+- [ ] Per ogni specialista fissare due intervalli distinti:
+  - **intervallo di training:** la difficoltà su cui si addestra, per esempio discesa da 2° a 9°, coprendo la soglia e un po' oltre;
+  - **intervallo di valutazione:** le situazioni di `situations.yaml` su cui la si giudica.
+
+  Conviene che il training copra tutta la famiglia e non un solo valore, perché il router applicherà il vettore su un intervallo di pendenze.
+- [ ] Aggiungere a `configs/situations.yaml`:
+  - il campo `family` con l'etichetta della libreria (`slope_down`, `slope_up`, `steps_down`, `rough`, `slippery`, `payload`). Serve qui per collegare specialista e situazioni, e nella fase 4 come etichetta del riconoscitore. Oggi il codice chiama `family` il modello del nome del blocco: rinominare quel campo interno (per esempio `template`) prima di introdurre questa etichetta, e aggiornare `video_situations: one_per_family`;
+  - la suite **`library`**, cioè le situazioni di valutazione delle specialiste scelte.
+
+---
+
+## 2. Codice da scrivere
+
+Seguire [REPO_STRUCTURE.md](../REPO_STRUCTURE.md). Il codice nuovo della fase è circoscritto a questi punti.
+
+### 2.1 `configs/training.yaml`, sezione `ppo`
+
+- [ ] **Parametri comuni a tutte le specialiste:**
+  - task mjlab di partenza (il task piano o hostile da cui si eredita la configurazione dell'ambiente);
+  - checkpoint iniziale (`alpha_walking`, punto 0.1);
+  - numero di ambienti, iterazioni, frequenza di salvataggio dei checkpoint, learning rate, coefficiente di entropia;
+  - deviazione standard iniziale dell'azione;
+  - semi di training;
+  - parametri della regolarizzazione verso `alpha_walking` (punto 4.3).
+- [ ] **Un blocco `overrides` per situazione,** solo con ciò che cambia: le situazioni (o l'intervallo) di training e, se servono, più iterazioni o un'altra ricompensa. Aggiungere una specialista significa aggiungere un nome lì, non un file nuovo.
+- [ ] I valori numerici iniziali vanno ripresi dai task `Mjlab-Hostile-Finetune*` di microduck_rl e da `MicroduckHostileRlCfg`, che sono la ricetta già provata del fine-tuning di `alpha_walking` (`rough-walk-e`: 800 iterazioni).
+
+### 2.2 `steerduck/mjlab_tasks.py`
+
+Traduce **le stesse voci** di `situations.yaml` in un task mjlab per il training su GPU.
+
+- [ ] **Terreno.** Un `TerrainGeneratorCfg` con i sub-terrain della famiglia, come "scala" di difficoltà: righe = difficoltà dentro l'intervallo di training, con la curriculum di `hostile_terrain_levels` di microduck_rl (promozione se l'episodio finisce in piedi seguendo il comando, retrocessione se cade). Accorgimenti:
+  - **riusare le classi** `FlatFacePyramidTerrainCfg` e `ProfileStripTerrainCfg` di `steerduck/scene.py`: sono già `SubTerrainCfg` di mjlab, quindi lo stesso codice genera il terreno in valutazione e in training;
+  - **discesa:** piramide a facce piane con partenza sulla piattaforma in cima. In ogni direzione si scende, ma lungo le diagonali ci sono le pieghe: verificare che non creino un caso troppo diverso dalla valutazione, che parte al centro di una faccia;
+  - **gradini in discesa:** piramide a gradini con partenza in cima;
+  - **irregolare:** i terreni `grid` e `rubble` degli stessi tipi della valutazione;
+  - tenere una piccola quota di terreno piano (per esempio 10-15%), come `hostile_subterrains`, perché la specialista non disimpari a camminare sul piano;
+  - mantenere `_soften_terrain_contacts` e la regola dei terreni "a fossa" (sezione 4.6 del piano).
+- [ ] **Attrito.** Evento all'avvio che imposta lo stesso coefficiente sui piedi **e** sui geom del terreno, campionato nell'intervallo di training (per esempio 0,1-0,3). Lo stesso vincolo della valutazione: in MuJoCo vince il massimo dei due coefficienti.
+- [ ] **Carico** (se si tiene): massa aggiunta al tronco con spostamento del baricentro, con `dr.body_mass` e lo spostamento del centro di massa già usato da microduck_rl per la randomizzazione.
+- [ ] **Registrazione dei task** `Mjlab-Spec-<famiglia>-MicroDuck` con `register_mjlab_task`, dal nostro pacchetto, **senza modificare microduck_rl**.
+- [ ] **Anti-rotazione.** Mantenere la condizione di promozione con spostamento reale (`min_progress`) e la ricompensa sulla rotazione più severa dei task `FinetuneFeetProgress`. Il run A di hostile ha imparato a girare in cerchio sulla piattaforma di partenza: la stessa trappola vale per noi, soprattutto in salita e sul rubble, dove la fase 1 mostra il robot fermo.
+
+### 2.3 `scripts/train.py ppo --situation <famiglia>`
+
+- [ ] Legge `training.yaml`, registra il task da `mjlab_tasks.py`, lancia il trainer di microduck_rl (`uv run train ...` con `--agent.resume True --agent.load-checkpoint ...`) e salva tutto in un run:
+  - `runs/<data>_train_ppo_<famiglia>/` con `config.yaml`, `run.json` (ore di GPU, commit di microduck_rl) e `log.txt`;
+  - i checkpoint `.pt`;
+  - le curve (`curves.parquet`, oltre a W&B).
+- [ ] Alla fine esporta il checkpoint scelto in ONNX con `scripts/export.py` di microduck_rl e lancia la valutazione del punto 5 sulla propria situazione e sul piano. REPO_STRUCTURE.md lo prevede: ogni training termina valutando il risultato.
+
+### 2.4 `steerduck/policy.py` e `configs/policies.yaml`
+
+- [ ] Una voce `specialist_<famiglia>` per ogni specialista, di tipo `onnx`, che punta a `models/specialist_<famiglia>/`. La valutazione funziona già con le policy ONNX.
+- [ ] Il caricamento da checkpoint rsl_rl (previsto da REPO_STRUCTURE.md "dalla fase 2"), solo se serve: per la distillazione della fase 3 basta la conversione ONNX → PyTorch esistente.
+
+### 2.5 `tests/test_sanity.py::test_conditions`
+
+- [ ] Dalla stessa voce di `situations.yaml`, il terreno generato per la valutazione (CPU) e per il training (mjlab) hanno la stessa geometria (altezze a campione), lo stesso attrito sui piedi e sul terreno e la stessa massa del carico. È l'unico punto in cui una situazione viene tradotta due volte (REPO_STRUCTURE.md, sezione 9).
+
+### 2.6 `steerduck/report.py` e `scripts/report.py --phase 2`
+
+- [ ] **Tabella per specialista:** nella propria situazione e sul piano, cadute (con intervallo di Wilson), errore di velocità, velocità, potenza, distanza percorsa e velocità di rotazione, a confronto con `alpha_walking` sugli stessi episodi (stessi semi).
+- [ ] **Decisione per specialista** secondo il criterio del punto 5.2, e il riepilogo "entra / non entra nella libreria".
+- [ ] **Distanza dalla policy ufficiale** (punto 5.3).
+
+### 2.7 Documentazione
+
+- [ ] Aggiornare REPO_STRUCTURE.md (stato, `training.yaml`, `mjlab_tasks.py`, `train.py`, test), il README (comandi della fase 2) e `results/runs_used.yaml` (`fase2`).
+
+---
+
+## 3. Verifiche prima di addestrare
+
+- [ ] **Guardare i terreni di training** con `visualize_terrain` di mjlab e con il viewer: pendenze, gradini e spigoli devono corrispondere alla valutazione, e il robot non deve partire sotto il pavimento.
+- [ ] **`alpha_walking` nel task di training, senza addestrarla** (`play` di mjlab). Deve peggiorare come nella fase 1, per esempio cadere in discesa da circa 5°. Se in mjlab non cade, il simulatore di training non riproduce il problema e la specialista non avrà niente da imparare: va capito prima di spendere ore di GPU. È anche la prima misura del rischio "due simulatori" (REPO_STRUCTURE.md, sezione 9).
+- [ ] **Fine-tuning di prova breve** (per esempio 50 iterazioni) su una sola famiglia:
+  - la ricompensa di partenza è quella di una policy che cammina già, non quella di una policy casuale;
+  - la lunghezza degli episodi non crolla nelle prime iterazioni;
+  - nessun termine di penalità è positivo.
+
+  Con il piano B del punto 0.1, verificare in più che il critic si sia stabilizzato prima di sbloccare l'attore.
+- [ ] **Misurare il tempo per iterazione** (punto 0.3) e fissare il budget.
+
+---
+
+## 4. Training delle specialiste
+
+### 4.1 Ordine
+
+- [ ] **Prima la discesa,** l'esempio del piano, fino in fondo (training, valutazione, dati). Serve a mettere a punto la procedura.
+- [ ] **Poi le altre in parallelo,** una per nodo (Faretra, Moro43).
+
+### 4.2 Protocollo per ogni specialista
+
+- [ ] **Fine-tuning da `alpha_walking`** con i parametri di `training.yaml`. Riferimento: `rough-walk-e` è `alpha_walking` più 800 iterazioni su terreni misti. Per una singola famiglia ne potrebbero bastare meno: partire da circa 500-1000 e guardare le curve.
+- [ ] **Salvare un checkpoint ogni 100 iterazioni** (o meno) e non scegliere automaticamente l'ultimo: la scelta si fa con la valutazione del punto 5. AGENTS.md di microduck_rl insiste che un training "fallito" va prima misurato sui checkpoint reali.
+- [ ] **Da guardare durante il training:**
+  - la ricompensa di inseguimento della velocità che cresce;
+  - la lunghezza degli episodi;
+  - il livello medio della curriculum di terreno, che deve salire;
+  - le penalità ≤ 0;
+  - la distanza percorsa (contro la rotazione in cerchio).
+- [ ] **Fissare le curricula a passi** (rampa della penalità sul tasso d'azione, intervalli della testa, randomizzazione del baricentro) allo stadio finale fin dall'inizio, come fa `_freeze_step_curricula`. Il passo esiste già e non si vuole che torni più brusco.
+- [ ] **Annotare nel run** le ore di GPU, per la metrica "costo di una situazione nuova" della fase 5.
+
+### 4.3 Tenere la specialista vicina ad `alpha_walking`
+
+La specialista serve come modello da imitare per un vettore che si somma ad `alpha_walking` (sezione 3.2, passo 1). Più si allontana, più è difficile che un vettore la riproduca. Decisioni:
+
+- [ ] **Prima prova con la ricompensa invariata** (come `FinetuneBase`) e solo il terreno della situazione. Cambiare la ricompensa, per esempio l'altezza dei piedi a 3,5 cm di `FinetuneFeet`, cambia il passo anche dove non serve. Usarla solo se senza non migliora.
+- [ ] **Valutare un termine di regolarizzazione verso `alpha_walking`:** penalità sulla distanza tra le azioni della specialista e quelle di `alpha_walking` nello stesso stato, con un peso piccolo. Non c'è nei task di microduck_rl, andrebbe aggiunto in `mjlab_tasks.py`. Da introdurre solo se la distanza misurata al punto 5.3 risulta grande.
+- [ ] **Meno iterazioni a parità di risultato:** tra due checkpoint ugualmente buoni nella situazione, scegliere il più vicino ad `alpha_walking`.
+
+### 4.4 Se il fine-tuning non basta
+
+Nell'ordine:
+1. più iterazioni;
+2. un intervallo di training più facile all'inizio (curriculum);
+3. la ricompensa di `FinetuneFeet` / `FinetuneFeetProgress`;
+4. training da zero (piano C).
+
+Se nemmeno così la specialista migliora, la situazione esce dalla libreria (criterio della fase). Sui gradini in salita è un esito probabile, per il limite fisico dell'altezza del passo.
+
+---
+
+## 5. Valutazione delle specialiste
+
+### 5.1 Protocollo
+
+- [ ] **Stesso simulatore e stesso protocollo della fase 1:** CPU MuJoCo + bam, `configs/eval.yaml`, stessi semi, quindi episodi accoppiati con `alpha_walking`.
+- [ ] **Per ogni specialista:**
+  - la suite della propria famiglia;
+  - il piano, per verificare che non sia peggiorata dove non serve;
+  - le **altre famiglie**: non è richiesto dal criterio, ma serve a capire se è una specialista o una policy più robusta in generale. Costa poco ed è utile per la fase 5.
+- [ ] **Valutare 3-5 checkpoint** per specialista e scegliere quello da promuovere con il criterio del punto 5.2.
+- [ ] **Più episodi nelle situazioni di soglia** (50-100, come suggerito in RESULTS_fase1.md): sono quelle su cui la fase 3 misurerà il vantaggio recuperato, e 20 episodi danno intervalli troppo larghi.
+
+### 5.2 Criterio "nettamente migliore"
+
+Il piano non dà una soglia numerica: va fissata prima di vedere i risultati, e scritta in `eval.yaml` come per la fase 1. Proposta:
+
+- [ ] **Nella propria famiglia, su almeno metà delle situazioni di soglia** (quelle in cui `alpha_walking` ha cadute fra il 20% e il 100%):
+  - cadute ridotte con intervalli di Wilson al 95% che non si sovrappongono;
+  - oppure, dove `alpha_walking` non cade (salita, carico, rubble fermo), velocità o potenza migliori con test di Welch p < 0,01 e una soglia minima, come per "peggiore del piano".
+- [ ] **Sul piano** nessun peggioramento significativo: cadute 0, potenza ed errore di velocità entro una tolleranza (per esempio +10%).
+- [ ] **Vantaggio disponibile:** riportare per ogni situazione la differenza di cadute fra `alpha_walking` e specialista. È il denominatore del "vantaggio recuperato" della fase 3 (sezione 3.2, passo 5): se è piccolo, anche un buon vettore mostrerà poco.
+
+### 5.3 Distanza dalla policy ufficiale
+
+- [ ] Sugli stati visitati da `alpha_walking` (dati del punto 7.1) e da ciascuna specialista nella propria situazione, misurare l'errore quadratico medio fra le azioni delle due policy:
+  - **nella situazione:** è quanto il vettore dovrà spostare;
+  - **sul piano:** dovrebbe essere piccola.
+
+  Serve a scegliere fra checkpoint (punto 4.3) e a prevedere quanto sarà difficile la distillazione.
+
+### 5.4 Controlli qualitativi
+
+- [ ] **Video** del primo episodio della specialista e di `alpha_walking` in alcune situazioni della famiglia (`video_situations`). Vanno guardati: AGENTS.md avverte che le metriche possono passare con un comportamento visibilmente sbagliato.
+- [ ] **Rotazione e distanza percorsa:** una specialista che "non cade" girando su se stessa o restando ferma non va promossa (vedi `rough_walk_g` con il carico laterale e sul rubble, nella fase 1).
+
+---
+
+## 6. Promozione
+
+- [ ] Per ogni specialista che supera il criterio:
+  1. copiare `.pt` e `.onnx` del checkpoint scelto in `models/specialist_<famiglia>/`, con un `.json` di metadati (run di origine, iterazione, situazioni di training, risultato della valutazione);
+  2. aggiungere la voce in `configs/policies.yaml`.
+- [ ] Registrare in `results/runs_used.yaml` (`fase2`) i run di training e di valutazione usati.
+- [ ] Per le situazioni escluse, annotare il motivo e i numeri, che entrano nella tesi.
+
+---
+
+## 7. Raccolta dei dataset per le fasi 3-4
+
+Sezioni 4.8, 4.9 e 4.11 del piano. Il formato è già quello della fase 1: `data/<run_id>/<controller>/<situazione>__seed<seme>.npz` più `fields.json`.
+
+### 7.1 `alpha_walking` in tutte le situazioni (probe, SAE, riconoscitore)
+
+- [ ] È il run del punto 0.2 (commit `6cd45fc`, più semi), con `record_steps` e `record_activations` attivi.
+- [ ] **Dimensione:** il piano indica circa un milione di passi come punto di partenza per il SAE sul layer da 512. Con 59 situazioni × 20 episodi × 5 semi × circa 1000 passi si arriva a qualche milione: verificare lo spazio (circa 2 kB per passo con le activation) e, se serve, ridurre gli episodi per seme.
+- [ ] **Transizioni:** riattivarle in `situations.yaml` (oggi sono commentate). Il riconoscitore della fase 4 ha bisogno proprio dei cambi di situazione durante l'episodio. Correggere prima l'anomalia di `trans_up_5deg` segnalata in RESULTS_fase1.md.
+
+### 7.2 Ogni specialista nella propria situazione (distillazione)
+
+- [ ] `evaluate.py specialist_<famiglia> --suite <famiglia>` con la registrazione attiva: salva per ogni passo l'osservazione (61) e l'azione della specialista (14). Sono le coppie del passo 2 della sezione 3.2.
+- [ ] **Quantità:** il piano suggerisce circa 100.000 coppie per situazione (da verificare); il vettore da imparare ha al massimo 512 numeri. Con circa 1000 passi per episodio servono un centinaio di episodi per famiglia, distribuiti su tutti i valori della famiglia.
+- [ ] Le activation della specialista non servono alla distillazione, perché il vettore si somma alle activation di `alpha_walking`. Si possono spegnere con `--no-activations` per risparmiare spazio, ma potrebbero servire a confrontare le rappresentazioni: decidere.
+- [ ] Il ciclo DAgger (passo 4 della sezione 3.2) appartiene alla fase 3. In questa fase serve solo il dataset iniziale.
+
+---
+
+## 8. Prodotti finali della fase
+
+- [ ] Specialiste promosse in `models/` e voci in `policies.yaml`.
+- [ ] Tabella della fase 2 (`results/tables/fase2_*.csv`) generata da `report.py --phase 2`.
+- [ ] Dataset di `alpha_walking` e delle specialiste in `data/`, con i run elencati in `runs_used.yaml`.
+- [ ] `docs/RESULTS_fase2.md`, sul modello di RESULTS_fase1.md:
+  - metodo (fine-tuning, intervalli di training, iterazioni, ore di GPU);
+  - risultati per specialista nella propria situazione e sul piano;
+  - distanza da `alpha_walking`;
+  - situazioni escluse e motivi;
+  - limiti (due simulatori, checkpoint di partenza).
+
+---
+
+## 9. Rischi e domande aperte
+
+| Rischio | Effetto | Cosa fare |
 |---|---|---|
-| Discesa | `face_5deg_downhill` 12/20 cadute, da 7,5° in su 20/20; `pyramid_7deg` 15/20; `trans_down_10deg` 19/20 | la candidata più chiara |
-| Salita | `face_7.5-12.5deg_uphill`: non cade, ma non avanza (velocità ~0, a 12,5° scivola indietro) | il peggioramento è nella velocità, non nelle cadute |
-| Gradini | `stairs_down_1.5cm` 16/20, `stairs_up_1.5cm` 18/20, da 2 cm in su 20/20 | da decidere: una specialista sola o salita e discesa separate |
-| Terreno irregolare | `grid_1.2-1.5cm` 8-10/20; `rubble_1.9-2.5cm` 15-16/20; da 1,3 cm cammina sul posto | |
-| Attrito basso | `friction_0.1` 20/20; a 0,2-0,3 non cade ma la potenza raddoppia (scivola); `trans_friction_0.15` 16/20 | |
-| Carico | nessuna caduta; potenza fino a 2,6 W col carico davanti; velocità ridotta col carico dietro | peggioramento lieve: da valutare se vale una specialista |
+| Checkpoint di `alpha_walking` non disponibile | Il fine-tuning parte da un critic casuale | Piano B del punto 0.1 (riscaldamento del critic), oppure piano C |
+| Simulatore di training (mjlab GPU) diverso da quello di valutazione (CPU + bam) | Una specialista buona in mjlab potrebbe non esserlo sullo stack CPU, o viceversa | Verifica del punto 3 (`alpha_walking` in mjlab), `test_conditions` e scelta del checkpoint fatta sullo stack CPU |
+| La specialista impara a girare in cerchio o a restare ferma | Ricompensa alta, comportamento inutile | Promozione con spostamento reale, ricompensa sulla rotazione più severa, controllo di distanza e rotazione nella valutazione |
+| Specialista troppo diversa da `alpha_walking` | Distillazione difficile nella fase 3 | Ricompensa invariata, poche iterazioni, eventuale regolarizzazione, misura della distanza (punto 5.3) |
+| Limite fisico (gradini in salita, pendenze ≥ 12,5°) | Nessuna specialista migliora | Escludere la situazione, come prevede il criterio |
+| Velocità reale circa 1/3 del comando anche sul piano | L'errore di velocità di riferimento è già 0,2 m/s | È coerente con le schede (0,11-0,12 m/s): confrontare le specialiste soprattutto su cadute, velocità, distanza e potenza, non sull'errore assoluto |
 
-Le **transizioni** non sono una situazione da specialista: servono a valutare riconoscitore e router (fase 4).
-
----
-
-## Decisione bloccante: da quale checkpoint parte il fine-tuning
-
-Il PPO di rsl_rl riparte da un **checkpoint**, che contiene attore, critico, normalizzazione delle osservazioni e stato dell'ottimizzatore. Il file ONNX non basta. Il checkpoint di `alpha_walking` (`model_9999.pt`, run W&B `yr25mna4`, citato dalla scheda di `rough-walk-e`) non è pubblico.
-
-| Opzione | Pro | Contro |
-|---|---|---|
-| **A. Chiedere il checkpoint** a Pollen Robotics o a Rémi Fabre | la strada più pulita: si parte esattamente dalla policy ufficiale, con il suo critico | dipende da altri; tempi incerti |
-| **B. Ricostruire il checkpoint dall'ONNX:** pesi dell'attore e normalizzazione copiati, critico nuovo | resta la policy ufficiale; non dipende da nessuno | il critico parte da zero: servono alcune iterazioni con l'attore **congelato** mentre il critico impara, altrimenti i primi aggiornamenti peggiorano la policy. Va verificato che la normalizzazione dell'ONNX corrisponda a quella attesa da rsl_rl |
-| **C. Riaddestrare** un `alpha_walking` equivalente (strada B della sezione 4.5 del piano) | controllo completo, checkpoint disponibile | la "policy ufficiale" studiata non è più quella distribuita; costa circa un'ora su RTX 5090 |
-
-Proposta: chiedere subito il checkpoint (A) e intanto preparare B. In ogni caso conviene verificare che la policy ripresa dal checkpoint, esportata in ONNX, coincida con `alpha_walking.onnx` (stesse uscite sugli stessi input, come nella fase 0) prima di usarla.
-
-- [ ] Scrivere a Pollen Robotics / Rémi Fabre per il checkpoint `yr25mna4/model_9999.pt`
-- [ ] In parallelo: prototipo dell'opzione B (attore + normalizzazione dall'ONNX, critico nuovo, attore congelato per N iterazioni)
-- [ ] Verifica: checkpoint ripreso → export ONNX → uscite uguali ad `alpha_walking.onnx`
-- [ ] Chiarire la discrepanza: `docs/velstand_policy.md` dice che `alpha_walking.onnx` viene dalla run `441tzs6d`, la scheda di `rough-walk-e` dalla `yr25mna4`
-
----
-
-## I componenti da realizzare
-
-Quattro pezzi. Il principio è che ogni confronto passi dallo **stesso codice**, così le differenze tra policy non nascono dagli script.
-
-### 1. Valutazione e registrazione, comune a tutte le policy
-
-Base: `fase1_bench.py`, che già garantisce stesse condizioni, episodi accoppiati (stesso terreno, partenza, tensione e rumore iniziale per ogni policy) e stesse metriche.
-
-Da aggiungere:
-- [ ] **Policy generica:** accettare non solo un file ONNX ma un "oggetto policy" (ONNX; PyTorch; PyTorch con hook che **modificano** le activation). Servirà nelle fasi 3-5 per valutare `alpha_walking` + vettore di steering, + LoRA, + router con lo stesso codice: è lì che un bias farebbe più danni
-- [ ] **Specialiste:** valutarle nella propria situazione e **sul piano**, come chiede il passo 2 della fase 2, e se possibile in tutte le altre situazioni, per vedere che cosa perdono
-- [ ] **Esperto che etichetta** (vedi componente 3): far camminare una policy e salvare, per ogni osservazione, anche l'azione che un'altra policy avrebbe scelto
-- [ ] Mantenere invariata la registrazione per passo (sezione 4.8) e il formato `.npz` (sezione 4.9)
-
-**Contro il bias:**
-- [ ] **Fissare la lista delle condizioni di valutazione prima** di addestrare le specialiste, e non cambiarla dopo, per non regolarle sul test
-- [ ] **Semi separati** tra training e valutazione
-- [ ] **Valori tenuti fuori** dal training: per esempio discesa addestrata fino a 10° e valutata anche a 12,5° e 15°, oppure attrito addestrato fino a 0,2 e valutato a 0,1. Misura se la specialista generalizza
-- [ ] Stesso numero di episodi per tutte le policy; intervalli di confidenza al 95% come nella fase 1
-
-**Nota sui simulatori:** le specialiste si addestrano in mjlab (GPU), ma si valutano nel simulatore CPU con i servo BAM. Vale anche per `alpha_walking`, quindi il confronto resta equo, e in più è un controllo di robustezza tra simulatori. Va però scritto nella tesi.
-
-### 2. Fine-tuning PPO comune, parametrizzato per situazione
-
-Un solo script, in cui le specialiste differiscono **solo** per la situazione.
-
-Uguale per tutte:
-- [ ] punto di partenza (il checkpoint scelto sopra)
-- [ ] iperparametri PPO (quelli di `MicroduckRlCfg`, eventualmente con tasso di apprendimento ridotto per il fine-tuning)
-- [ ] numero di iterazioni (riferimento: 800 come `rough-walk-e`) e numero di copie parallele
-- [ ] semi (almeno 2-3 per specialista: il piano chiede media, minimo e massimo sui semi)
-- [ ] domain randomization di `alpha_walking` (attrito piedi 0,7-1,3, massa ±5%, spinte, tensione 6,5-8,2 V, ritardo 3-6 passi)
-- [ ] reward della camminata di `alpha_walking`, invariati
-
-Diversa per ogni specialista: **solo la configurazione dell'ambiente** (terreno, attrito, carico).
-
-**Gli ambienti di training devono corrispondere alle condizioni del benchmark**, altrimenti la specialista impara una situazione diversa da quella su cui viene valutata:
-- [ ] **Discesa e salita:** piramide a **facce piane** (non `HfPyramidSlopedTerrainCfg`, che ha le pieghe sotto i piedi); pendenze con un curriculum fino al massimo addestrato
-- [ ] **Gradini e terreno irregolare:** gli stessi tipi del benchmark (`BoxPyramidStairsTerrainCfg`, `BoxRandomGridTerrainCfg`, ciottoli `HfRandomUniformTerrainCfg`), stesse forme, altezze nel range di addestramento
-- [ ] **Attrito:** impostato **sia sui piedi sia sul terreno** (in MuJoCo vale il massimo dei due). L'evento `foot_friction` di training randomizza solo i piedi: va sostituito o affiancato
-- [ ] **Carico:** corpo rigido saldato al tronco, posto nel centro di massa oppure spostato, come nel benchmark; massa e posizione estratte per episodio
-
-**Restare vicini ad `alpha_walking`:** il piano conta sul fatto che la specialista cambi solo il necessario, così la differenza da colmare con un vettore è piccola.
-- [ ] Valutare un tasso di apprendimento basso, oppure un termine che ancori la policy all'originale (come l'ancora di imitazione di `velstand`, `docs/velstand_policy.md`)
-- [ ] Misurare quanto la specialista si allontana: differenza media tra le sue azioni e quelle di `alpha_walking` sugli stessi stati, e camminata sul piano
-
-**Export:**
-- [ ] ogni specialista esportata in ONNX con `scripts/export.py`, stesso formato di `alpha_walking` (61 → 14, normalizzazione inclusa), così entra direttamente nella valutazione comune
-- [ ] registrare per ogni specialista: commit, task, semi, iterazioni, ore di GPU (servono per il "costo di una situazione nuova" della fase 5)
-
-### 3. Raccolta ed etichettatura dei dati per la distillazione
-
-Dal passo 3 della fase 2 e dalla sezione 3.2 (passi 2 e 4) del piano:
-
-- [ ] **Rollout di `alpha_walking` in tutte le situazioni** (per probe, SAE e riconoscitore): già prodotti dalla fase 1 con `SAVE_STEPS = True`. Va verificato che siano abbastanza: il piano indica circa un milione di passi come punto di partenza per il SAE
-- [ ] **Rollout di ogni specialista nella propria situazione**, con le coppie (osservazione, azione della specialista): il dataset del passo 2 della distillazione
-- [ ] **Etichettatura per DAgger** (fase 3, passo 4 della sezione 3.2): far camminare `alpha_walking` (poi `alpha_walking` + vettore) e salvare, per ogni osservazione, l'azione che **avrebbe scelto la specialista**. Non serve una nuova simulazione: basta dare l'osservazione alla rete della specialista. Si può fare come opzione "esperto che etichetta" dello script di valutazione, senza scriverne uno nuovo
-- [ ] Formato: lo stesso `.npz` della fase 1, con in più un campo `expert_action` (14 numeri) quando c'è un esperto
-
-### 4. Script SAE (appartiene alla fase 3, ma si può preparare)
-
-Nel piano il SAE è il primo passo della fase 3. Prepararlo ora va bene, tenendo presente che:
-- [ ] si addestra sulle activation di **`alpha_walking`** (non delle specialiste) in **tutte** le situazioni, **bilanciate**: se il piano domina il dataset, domina anche il dizionario
-- [ ] va scelto il layer: si parte da quello in cui si farà lo steering (il piano usa come esempio il secondo, 256 numeri), ma conviene un SAE per ciascuno dei tre
-- [ ] libreria: `overcomplete` oppure un SAE scritto a mano (sezione 4.2)
-- [ ] **controllo obbligatorio** (sezione 3.6): la policy con l'activation sostituita dalla sua ricostruzione, senza alcuna modifica, deve camminare come prima. Il controllo passa dallo script di valutazione comune (componente 1, con un hook che sostituisce l'activation)
-- [ ] verificare che la quantità di dati basti: la qualità della ricostruzione deve smettere di migliorare aggiungendo dati (sezione 4.9)
-
----
-
-## Ordine di lavoro proposto
-
-1. [ ] **Checkpoint:** richiesta (A) e prototipo di ricostruzione (B); verifica di equivalenza con `alpha_walking.onnx`
-2. [ ] **Scelta delle situazioni** per le specialiste, dalla tabella sopra; lista delle condizioni di valutazione **fissata** prima del training, con i valori tenuti fuori
-3. [ ] **Ambienti di training in mjlab** per ogni situazione, allineati al benchmark (facce piane, attrito su piedi e terreno, carico)
-4. [ ] **Script di fine-tuning comune**; prova breve su una situazione (la discesa) per misurare tempo e stabilità del primo avvio. È anche il punto 4 della fase 0, rimasto aperto
-5. [ ] **Valutazione comune estesa** a policy generiche; valutazione della prima specialista nella sua situazione e sul piano
-6. [ ] Se la prima specialista supera il criterio: le altre situazioni, con lo stesso script
-7. [ ] **Raccolta dati:** rollout delle specialiste; opzione "esperto che etichetta" pronta per la fase 3
-8. [ ] (Anticipo della fase 3) **script SAE** e controllo della ricostruzione
-
-## Criteri e misure da riportare
-
-- [ ] Per ogni specialista, nella propria situazione: cadute, errore di velocità, potenza, con IC 95%, contro `alpha_walking` sugli stessi episodi
-- [ ] Sul piano: la specialista non deve peggiorare in modo significativo
-- [ ] Sui valori tenuti fuori dal training: quanto generalizza
-- [ ] Vicinanza ad `alpha_walking`: differenza media delle azioni sugli stessi stati
-- [ ] Costo: ore di GPU per specialista (fine-tuning) e per dati
-- [ ] Decisione per ciascuna situazione: **entra nella libreria** solo se la specialista è nettamente migliore
-
-## Rischi e domande aperte
-
-- **Checkpoint non disponibile e ricostruzione instabile:** il critico nuovo può destabilizzare i primi aggiornamenti. Mitigazione: attore congelato all'inizio, tasso di apprendimento basso.
-- **Distanza tra simulatori:** una specialista può sfruttare dettagli di mjlab che il simulatore CPU con i servo BAM non riproduce. Da controllare valutando le specialiste anche in mjlab.
-- **Specialista troppo lontana da `alpha_walking`:** il vettore non riuscirebbe a colmare la differenza (fase 3). Da monitorare con la vicinanza delle azioni.
-- **Carico e salita:** il peggioramento di `alpha_walking` è nella potenza o nella velocità, non nelle cadute. Va deciso se basta per una specialista o se queste situazioni escono dalla libreria.
-- **Gradini:** una specialista per salita e discesa insieme, oppure due separate?
-- **Fase 0, punto 4 ancora aperto:** il tempo di un fine-tuning su RTX 3090 e RTX 5090 si misura con la prima specialista.
+**Decisioni da prendere prima di iniziare:**
+1. Quali famiglie entrano nella libreria (punto 1).
+2. Da dove parte il fine-tuning: checkpoint di Pollen, piano B o piano C (punto 0.1).
+3. La soglia numerica di "nettamente migliore" (punto 5.2).
+4. Se usare la regolarizzazione verso `alpha_walking` fin dall'inizio o solo se serve (punto 4.3).

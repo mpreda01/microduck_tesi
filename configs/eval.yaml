@@ -1,0 +1,52 @@
+# Simulator and evaluation protocol, shared by every evaluation (REPO_STRUCTURE.md, section 3).
+# CPU MuJoCo, robot of microduck_rl's scripts/infer_policy.py, XL330 servos simulated by bam,
+# 61-D observations, policy at 50 Hz: the same simulator as phases 0 and 1.
+# Options of scripts/evaluate.py override suite, episodes, recording, videos and workers.
+
+# ---- robot and physics ----
+scene_xml: scene.xml              # in microduck_rl/src/mjlab_microduck/robot/microduck
+physics_dt_s: 0.005
+decimation: 4                     # physics steps per control step: 50 Hz policy
+action_scale: 1.0                 # motor targets = default pose + action_scale x action
+actuator: {model: bam, kp: 200.0, vin: 7.4, max_current_a: 1.75}   # bam XL330 m6; "position" = MuJoCo servos
+fall_tilt_deg: 70.0               # fall: trunk tilt from vertical above this
+spawn_height_m: 0.125             # trunk height above the highest ground point under the start
+patch_size_m: 8.0                 # terrain patch, 4 m from the centre to the edge
+border_width_m: 4.0               # flat border around the patch
+face_slope_size_m: 40.0           # planar-face pyramid: start in the middle of a face, 10 m from the centre
+strip_width_m: 4.0
+
+# ---- episodes ----
+suite: all                        # suite of configs/situations.yaml
+episodes_per_situation: 20
+seeds: [0]                        # same draws for every controller: episodes are paired
+episode_s: 20.0                   # default length; a situation can set its own episode_s
+command_vx_m_s: 0.3               # constant forward command
+heading_hold: {enabled: true, stiffness: 1.0, max_rad_s: 1.0}   # yaw-rate command = clip(k x heading error)
+vin_range: [7.0, 7.8]             # battery voltage drawn per episode [V] (training 6.5-8.2)
+init_joint_noise_rad: 0.02        # uniform offset of the initial joint angles
+heading_jitter_deg: 5.0           # directional terrains: start heading +- this
+start_lateral_jitter_m: 0.3       # directional terrains: start offset across the walking direction
+warmup_s: 1.0                     # walking metrics averaged after this time
+
+# ---- per-step data (plan sections 4.8-4.9): data/<run_id>/<controller>/<situation>.npz ----
+record_steps: true
+record_activations: true          # the three hidden layers in float16: most of the size
+fall_horizon_s: 2.0               # label falls_within_2s: steps less than this before a fall
+
+# ---- videos of the first episode of some situations ----
+video: true
+video_every_n_steps: 2
+video_size: [640, 480]
+# a list of names | [] or null = every situation | one_per_family = the first situation of each block of situations.yaml
+video_situations: one_per_family
+
+workers: 0                        # parallel processes (0 = one per CPU core)
+log_every_s: 10.0                 # a progress line every N simulated seconds of each episode (0 = only the end)
+
+# ---- report: "measurably worse than the reference" (scripts/report.py) ----
+reference: flat
+min_worse_groups: 3               # phase 1 criterion: at least three situations
+worse_p_value: 0.01               # Welch test on velocity error and power
+worse_min_vel_error_increase_m_s: 0.02
+worse_min_power_ratio: 1.10
