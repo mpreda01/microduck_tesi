@@ -110,6 +110,37 @@ def stage_critic_warmup(alg, warmup: dict, finetune: dict):
     alg.update = staged_update
 
 
+def upload_to_huggingface(run_dir: Path, family: str, ppo: dict) -> str:
+    """Upload a trained specialist to the Hugging Face model repo <namespace>/<family>-<YYYYMMDD-HHMM>.
+    The timestamp is the one of the run folder (<YYYYMMDD-HHMM>_train_ppo_<family>), which is also the name
+    of the W&B run: repo, local run and W&B run point to the same training. -> the repo id."""
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    hf = ppo["huggingface"]
+    namespace = hf["namespace"] or api.whoami()["name"]
+    timestamp = run_dir.name.split("_")[0]
+    repo_id = f"{namespace}/{family}-{timestamp}"
+
+    onnx = run_dir / f"{run_dir.name}.onnx"
+    last_checkpoint = max(run_dir.glob("model_*.pt"), key=lambda path: int(path.stem.split("_")[1]))
+    files = [onnx, last_checkpoint, run_dir / "config.yaml", run_dir / "run.json"]
+    model_card = (
+        f"# {family} specialist ({timestamp})\n\n"
+        f"Microduck walking policy: `{ppo['init_controller']}` fine-tuned with PPO on the `{family}` family.\n\n"
+        f"- training run and W&B run: `{run_dir.name}` "
+        f"(W&B project `{ppo['wandb']['project']}`, group `{ppo['wandb']['group']}`)\n"
+        f"- `{onnx.name}`: the policy, 61 observations -> 14 actions\n"
+        f"- `{last_checkpoint.name}`: the last rsl_rl checkpoint (actor and critic)\n"
+        f"- `config.yaml`, `run.json`: configuration and manifest of the run\n")
+
+    api.create_repo(repo_id, private=hf["private"], exist_ok=True)
+    for path in files:
+        api.upload_file(path_or_fileobj=path, path_in_repo=path.name, repo_id=repo_id)
+    api.upload_file(path_or_fileobj=model_card.encode(), path_in_repo="README.md", repo_id=repo_id)
+    return repo_id
+
+
 def train_specialist(family: str, ppo: dict, run_dir: Path, device: str):
     """Fine-tune ppo['init_controller'] on one family. Checkpoints go to run_dir (model_<it>.pt) and the
     latest one also as <run_id>.onnx, the file configs/policies.yaml points to with `run: <run_id>`."""

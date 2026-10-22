@@ -53,12 +53,19 @@ def main():
     config.write_manifest(run_dir, status="running", device=device)
     log.info(f"run {run_dir}: {args.situation} on {device}, {ppo['num_envs']} environments")
 
-    from steerduck.mjlab_tasks import train_specialist
+    from steerduck.mjlab_tasks import train_specialist, upload_to_huggingface
     t0 = time.time()
     diff = train_specialist(args.situation, ppo, run_dir, device)
     hours = (time.time() - t0) / 3600
-    config.write_manifest(run_dir, status="done", device=device, runtime_s=time.time() - t0, actor_onnx_max_diff=diff,
-                          gpu_hours=hours if device.startswith("cuda") else 0.0)
+    results = {"runtime_s": time.time() - t0, "actor_onnx_max_diff": diff,
+               "gpu_hours": hours if device.startswith("cuda") else 0.0}
+    config.write_manifest(run_dir, status="done", device=device, **results)
+
+    if ppo["huggingface"]["upload"]:
+        repo_id = upload_to_huggingface(run_dir, args.situation, ppo)
+        config.write_manifest(run_dir, status="done", device=device, huggingface_repo=repo_id, **results)
+        log.info(f"uploaded to https://huggingface.co/{repo_id}")
+
     log.info(f"done in {hours * 60:.1f} min -> {run_dir}\n"
              f"evaluate: add `specialist_{args.situation}: {{type: onnx, run: {run_dir.name}}}` to "
              f"configs/policies.yaml, then python scripts/evaluate.py specialist_{args.situation}")

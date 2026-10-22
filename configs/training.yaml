@@ -21,7 +21,11 @@ ppo:
     tags: [phase2]                 # the family (e.g. slope_down) is added as a tag
     mode: online                   # online | offline (then `wandb sync <run folder>/wandb/offline-run-*`)
     upload_model: true             # upload the checkpoints (.pt) and their ONNX to W&B
-  save_interval: 100              # checkpoint (model_<it>.pt) every N iterations; the latest also as ONNX
+  huggingface:                     # upload of the trained specialist to the model repo <namespace>/<family>-<YYYYMMDD-HHMM>,
+    upload: true                   # the timestamp of the run folder, which is also the name of the W&B run
+    namespace: null                # Hugging Face user or organization; null = the logged-in user
+    private: false
+  save_interval: 100               # checkpoint (model_<it>.pt) every N iterations; the latest also as ONNX
   reward: {feet: false, track: false, progress: true}   # options of microduck_rl's hostile task:
                                    # feet = 3.5 cm foot swing, track = stricter speed tracking,
                                    # progress = anti-circling (promotion needs real displacement)

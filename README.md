@@ -106,6 +106,14 @@ config includes the whole `ppo` section of training.yaml. Log in once per machin
 (on Colab or a cluster: `export WANDB_API_KEY=...`). Offline runs are synced later with
 `wandb sync runs/<run folder>/wandb/offline-run-*`.
 
+**Hugging Face.** At the end of a training, the specialist is uploaded to the model repo
+`<namespace>/<family>-<YYYYMMDD-HHMM>`, e.g. `slope_down-20261022-1943`: the timestamp of the run folder,
+which is also the name of the W&B run. The repo holds the ONNX, the last checkpoint, `config.yaml`,
+`run.json` and a short model card; `run.json` records the repo id. Settings in the `huggingface` block of
+training.yaml (upload on/off, namespace, private). Log in once with `huggingface-cli login` (or
+`export HF_TOKEN=...`). To evaluate a policy from its repo, add to configs/policies.yaml
+`specialist_slope_down: {type: onnx, hf: [<namespace>/slope_down-<timestamp>, <run folder>.onnx]}`.
+
 ## Tests
 
 ```bash
