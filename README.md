@@ -81,8 +81,26 @@ then `python scripts/report.py --phase 1` alone regenerates the table.
 **Timing** (Colab CPUs, 68 situations x 20 episodes): about 32 minutes per policy without the per-step
 data; 1-1.5 hours and about 2 GB per policy with them (about 0.5 GB with `--no-activations`).
 
+## Phase 2: specialist policies
+
+Each specialist is `alpha_walking` fine-tuned with PPO on one family of situations. The training
+checkpoint of `alpha_walking` is not public, so the actor (weights and observation normalization) is
+rebuilt from its ONNX and checked against it, and the critic is trained alone first, with the actor
+frozen. Parameters and families are in [configs/training.yaml](configs/training.yaml).
+
+| Step | Command (same prefix as phase 1) |
+|---|---|
+| Choose the exploration noise `action_std` | `python scripts/evaluate.py alpha_walking --suite flat --no-record --action-noise 0.1` (one run per value; keep the largest that does not degrade flat walking) |
+| Quick test of the training | `python scripts/train.py ppo --situation slope_down --num-envs 32 --warmup-iterations 2 --finetune-iterations 2` |
+| Train a specialist (GPU) | `python scripts/train.py ppo --situation slope_down` |
+| Evaluate it | add `specialist_slope_down: {type: onnx, run: <run folder>}` to [configs/policies.yaml](configs/policies.yaml), then `python scripts/evaluate.py alpha_walking specialist_slope_down --suite fixed` |
+
+`train.py` writes `runs/<YYYYMMDD-HHMM>_train_ppo_<family>/` with `init_actor.pt`, the checkpoints
+`model_<it>.pt`, `<run folder>.onnx` (the latest checkpoint), the tensorboard logs (`tensorboard --logdir runs`)
+and `run.json` with the GPU hours.
+
 ## Tests
 
 ```bash
-uv run --project external/microduck_rl --with-editable ".[test]" pytest tests
+uv run --project microduck_rl --with-editable . --with pytest python -m pytest tests
 ```

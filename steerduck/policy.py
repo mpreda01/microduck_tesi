@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from steerduck.config import CONFIGS, MODELS, load_yaml
+from steerduck.config import CONFIGS, MODELS, RUNS, load_yaml
 
 N_OBS = 61
 
@@ -146,6 +146,48 @@ def hidden_layers(model) -> list:
     return elus
 
 
+NORMALIZER_EPS = 1e-2       # rsl_rl's EmpiricalNormalization: (x - mean) / (std + eps)
+FROZEN_COUNT = 10 ** 15     # samples "already seen" by the normalizer (see onnx_to_rsl_rl_actor)
+
+
+def onnx_to_rsl_rl_actor(path, action_std: float) -> dict:
+    """State dict of rsl_rl's actor (MLPModel, rsl_rl 5) rebuilt from the ONNX of a Microduck policy, to
+    fine-tune a policy whose training checkpoint is not available. The ONNX holds the four Linear layers
+    and the observation normalization (x - mean) / (std + eps). It does not hold the action std, chosen
+    here, nor the critic, which training builds from scratch.
+    rsl_rl keeps updating the normalizer with weight batch / count: with count 0 the first batch would
+    replace the statistics the weights were trained with, so count is set so high that it never moves."""
+    import torch
+    model = onnx_to_torch(path)
+    norm = [m for m in model if hasattr(m, "op")]
+    linears = [m for m in model if isinstance(m, torch.nn.Linear)]
+    if [m.op for m in norm] != ["Sub", "Div"] or len(linears) != 4:
+        raise ValueError(f"{path}: expected input normalization (Sub, Div) and 4 linear layers")
+    std = norm[1].c - NORMALIZER_EPS
+    state = {"obs_normalizer._mean": norm[0].c.clone(), "obs_normalizer._var": std ** 2,
+             "obs_normalizer._std": std, "obs_normalizer.count": torch.tensor(FROZEN_COUNT),
+             "distribution.std_param": torch.full((linears[-1].out_features,), float(action_std))}
+    for index, layer in zip((0, 2, 4, 6), linears):   # nn.Sequential indices of rsl_rl's MLP (ELU in between)
+        state[f"mlp.{index}.weight"] = layer.weight.detach().clone()
+        state[f"mlp.{index}.bias"] = layer.bias.detach().clone()
+    return state
+
+
+def actor_onnx_difference(actor, path, n: int = 10_000) -> float:
+    """Largest difference between the deterministic output of an rsl_rl actor and onnxruntime on the same
+    random observations: the rebuilt actor must be the policy evaluated in phase 1 (< 1e-5)."""
+    import onnxruntime as ort
+    import torch
+    from tensordict import TensorDict
+    x = np.random.default_rng(0).normal(size=(n, N_OBS)).astype(np.float32)
+    sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    expected = np.concatenate([sess.run(None, {sess.get_inputs()[0].name: row[None]})[0] for row in x])
+    device = next(actor.parameters()).device
+    obs = TensorDict({group: torch.from_numpy(x) for group in actor.obs_groups}, batch_size=[n]).to(device)
+    with torch.no_grad():
+        return float(np.abs(actor(obs).cpu().numpy() - expected).max())
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -158,6 +200,8 @@ def resolve(name: str) -> dict:
     entry = registry[name]
     if "path" in entry:
         path = MODELS / entry["path"]
+    elif "run" in entry:   # the policy exported by a training run, before it is promoted to models/
+        path = RUNS / entry["run"] / f"{entry['run']}.onnx"
     else:
         repo, filename = entry["hf"]
         path = MODELS / name / filename

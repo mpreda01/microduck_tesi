@@ -34,6 +34,7 @@ def parse_args():
     p.add_argument("--only", help="comma-separated situation names: only these of the suite")
     p.add_argument("--episodes", type=int, help="episodes per situation")
     p.add_argument("--workers", type=int, help="parallel processes (0 = one per CPU core)")
+    p.add_argument("--action-noise", type=float, help="std of the Gaussian noise added to every action")
     p.add_argument("--no-record", action="store_true", help="no per-step data")
     p.add_argument("--no-activations", action="store_true", help="per-step data without the activations")
     p.add_argument("--no-video", action="store_true", help="no videos")
@@ -49,7 +50,7 @@ def main():
     args = parse_args()
     conf = config.load_yaml(config.CONFIGS / "eval.yaml")
     overrides = {"suite": args.suite, "episodes_per_situation": args.episodes, "workers": args.workers,
-                 "record_steps": False if args.no_record else None,
+                 "action_noise_std": args.action_noise, "record_steps": False if args.no_record else None,
                  "record_activations": False if args.no_activations else None,
                  "video": False if args.no_video else None}
     conf |= {k: v for k, v in overrides.items() if v is not None}
@@ -61,6 +62,8 @@ def main():
         conf["video_situations"] = list(first_of_family.values())
 
     name = args.name or "+".join(args.controllers or ["preview"]) + f"_{conf['suite']}" + ("_only" if args.only else "")
+    if conf["action_noise_std"]:
+        name += f"_noise{conf['action_noise_std']}"
     run_dir = config.new_run("evaluate", name)
     config.setup_logging(run_dir / "log.txt")
     com_trunk, robot_mass = robot_com_in_trunk(conf)

@@ -48,13 +48,12 @@ Do not read the large notebooks (`fase_0.ipynb` is 1.4 MB) whole. To look into o
 
 ## Running and checking
 
-- The simulator (mujoco, mjlab 1.3.0, bam) runs **on Colab**, inside microduck_rl's environment: `uv run --project external/microduck_rl --with-editable . python scripts/<script>.py ...` (setup in [README.md](README.md)). **It is not installed on this machine**, so simulation code cannot be run here: say so plainly, and never claim a simulation result you did not obtain.
-- Local checks that work:
+- The simulator (mujoco, mjlab 1.3.0, bam, rsl_rl) is **installed locally**, in microduck_rl's environment `microduck_rl/.venv`, and simulations already run on this machine. Run the scripts with `uv run --project microduck_rl --with-editable . python scripts/<script>.py ...` (on Colab: `--project external/microduck_rl`, setup in [README.md](README.md)). Never claim a simulation result you did not obtain.
+- Local checks:
   - `python -m py_compile` on the changed files;
-  - pure-Python logic (situations, metrics, report on a fake run) with Python 3.12 (`C:\Users\mpred\AppData\Local\Programs\Python\Python312\python.exe`), using a scratchpad venv with numpy/pandas/scipy/pyyaml/pyarrow, `PYTHONPATH=.`, and stub modules for `mujoco` / `mjlab`;
-  - set `STEERDUCK_STORAGE` to a scratchpad folder, so that test runs do not land in the repository.
+  - short real runs (few situations and episodes, `--no-video`) with `STEERDUCK_STORAGE` set to a scratchpad folder, so that test runs do not land in the repository's `runs/` and `data/`.
 
-  The default `python` on PATH is an MSYS Python 3.9 without packages.
+  The default `python` on PATH is an MSYS Python 3.9 without packages: do not use it.
 - Clean up what checks create in the repository (`__pycache__` of the new code, `results/tables` of a test). Never delete files tracked by git while cleaning up (`notebooks/_build/__pycache__` is tracked).
 
 ## Working with the user

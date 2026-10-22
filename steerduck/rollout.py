@@ -102,8 +102,9 @@ def walking_metrics(trace: dict, conf: dict, event_step=None) -> dict:
 def run_episode(robot: Robot, controller, conf: dict, s: dict, origin, size, rng, robot_mass,
                 video=None, steps: dict | None = None, tag: str = "") -> dict:
     """Run one episode -> its results. The draws come from `rng` in a fixed order (start, battery
-    voltage, joint noise), so that every controller gets the same episode. If `steps` is given, one row
-    per control step is appended to its lists."""
+    voltage, joint noise), so that every controller gets the same episode. With action_noise_std > 0 a
+    Gaussian noise is added to every action, as PPO's exploration does: it is drawn after the start, so
+    the episode itself does not change. If `steps` is given, one row per control step is appended."""
     d, dt = robot.data, control_dt(conf)
     x, y, yaw0 = start_pose(s, origin, size, rng, conf)
     vin = rng.uniform(*conf["vin_range"])
@@ -131,6 +132,8 @@ def run_episode(robot: Robot, controller, conf: dict, s: dict, origin, size, rng
             command[2] = float(np.clip(hold["stiffness"] * err, -hold["max_rad_s"], hold["max_rad_s"]))
         obs = robot.observation(action, command)
         action = controller.act(obs)
+        if conf["action_noise_std"]:   # the noisy action is also the last action the policy observes
+            action = (action + rng.normal(0.0, conf["action_noise_std"], action.shape)).astype(np.float32)
         power = sum(robot.step(DEFAULT_POSE + conf["action_scale"] * action) for _ in range(conf["decimation"]))
         power /= conf["decimation"]
         if video is not None:
@@ -253,7 +256,7 @@ def run_situation(task: dict) -> list[dict]:
         result = run_episode(robot, controller, conf, s, origin, size, rng, robot_mass, video, steps,
                              tag=f"[{spec['name']}] {name} ep {k + 1}/{n_episodes}")
         episodes.append({"controller": spec["name"], "situation": name, "group": s["group"], "seed": seed,
-                         "episode": k, **result})
+                         "episode": k, "action_noise_std": conf["action_noise_std"], **result})
         if video is not None:
             (Path(task["run_dir"]) / "videos").mkdir(exist_ok=True)
             video.save(Path(task["run_dir"]) / "videos" / f"{spec['name']}__{name}__seed{seed}.mp4",
