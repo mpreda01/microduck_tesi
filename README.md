@@ -99,6 +99,13 @@ frozen. Parameters and families are in [configs/training.yaml](configs/training.
 `model_<it>.pt`, `<run folder>.onnx` (the latest checkpoint), the tensorboard logs (`tensorboard --logdir runs`)
 and `run.json` with the GPU hours.
 
+**Weights & Biases.** Training runs are logged to W&B as set in the `wandb` block of
+[configs/training.yaml](configs/training.yaml): project, entity, group, tags (the family is added),
+mode (`online` / `offline`) and checkpoint upload. The W&B run takes the name of the run folder, and its
+config includes the whole `ppo` section of training.yaml. Log in once per machine with `wandb login`
+(on Colab or a cluster: `export WANDB_API_KEY=...`). Offline runs are synced later with
+`wandb sync runs/<run folder>/wandb/offline-run-*`.
+
 ## Tests
 
 ```bash

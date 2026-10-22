@@ -106,7 +106,8 @@ In fondo al file ci sono le **suite**, cioè gruppi di situazioni usati insieme 
 **`training.yaml`** — un file con quattro sezioni:
 - `ppo`: le specialiste della fase 2. Contiene:
   - la policy di partenza (`init_controller: alpha_walking`, da `policies.yaml`) e il rumore d'azione iniziale `action_std`, che non è nell'ONNX e si sceglie con `evaluate.py --action-noise`;
-  - ambienti, seme, logger, frequenza dei checkpoint;
+  - ambienti, seme, frequenza dei checkpoint;
+  - il logging su Weights & Biases (blocco `wandb`): progetto, entity, gruppo, tag (si aggiunge la famiglia), modalità `online`/`offline`, caricamento dei checkpoint. Il run W&B prende il nome della cartella del run e salva i suoi file dentro di essa; il suo config contiene tutta la sezione `ppo`;
   - le opzioni di ricompensa del task hostile di microduck_rl (`feet`, `track`, `progress`);
   - le due fasi: `critic_warmup` (iterazioni e learning rate del solo critic) e `finetune` (iterazioni, learning rate, schedule, KL, entropia);
   - la scala di terreni (dimensione dei patch, righe, quota di piano);
@@ -187,7 +188,8 @@ runs/<AAAAMMGG-HHMM>_<comando>_<nome>/
 ├── episodes.parquet   una riga per episodio (se c'è una valutazione)
 ├── model_<it>.pt      i checkpoint (se è un training): train ppo ne salva ogni save_interval iterazioni,
 ├── <run_id>.onnx      più init_actor.pt (l'attore di partenza) e l'ONNX dell'ultimo checkpoint
-├── events.out.*       le curve di training (tensorboard, oppure W&B)
+├── events.out.*       le curve di training (tensorboard), copiate anche su W&B
+├── wandb/             i file locali del run W&B (da sincronizzare se offline)
 └── curves.parquet     curve dei cicli DAgger (fase 3)
 ```
 

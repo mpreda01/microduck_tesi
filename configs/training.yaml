@@ -13,8 +13,15 @@ ppo:
                                    # 0.05 -> power +6 %, 0.1 -> +25 %, 0.2 -> +98 %, 0.3 -> +236 % and 1 fall
   num_envs: 4096
   seed: 0
-  logger: tensorboard              # tensorboard | wandb
-  save_interval: 100               # checkpoint (model_<it>.pt) every N iterations; the latest also as ONNX
+  wandb:                           # logging of the training runs; the tensorboard files are written in the run anyway
+    enabled: true                  # false = tensorboard only
+    project: microduck_thesis
+    entity: null                   # W&B user or team; null = your default entity
+    group: phase2_specialists      # groups the runs in the W&B interface
+    tags: [phase2]                 # the family (e.g. slope_down) is added as a tag
+    mode: online                   # online | offline (then `wandb sync <run folder>/wandb/offline-run-*`)
+    upload_model: true             # upload the checkpoints (.pt) and their ONNX to W&B
+  save_interval: 100              # checkpoint (model_<it>.pt) every N iterations; the latest also as ONNX
   reward: {feet: false, track: false, progress: true}   # options of microduck_rl's hostile task:
                                    # feet = 3.5 cm foot swing, track = stricter speed tracking,
                                    # progress = anti-circling (promotion needs real displacement)

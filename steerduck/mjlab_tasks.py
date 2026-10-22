@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -60,12 +61,23 @@ def make_rl_cfg(ppo: dict):
     from mjlab_microduck.tasks.microduck_velocity_hostile_env_cfg import MicroduckHostileRlCfg
 
     cfg = copy.deepcopy(MicroduckHostileRlCfg)
-    cfg.seed, cfg.logger, cfg.save_interval = ppo["seed"], ppo["logger"], ppo["save_interval"]
+    cfg.seed, cfg.save_interval = ppo["seed"], ppo["save_interval"]
+    cfg.logger = "wandb" if ppo["wandb"]["enabled"] else "tensorboard"
+    cfg.wandb_project, cfg.upload_model = ppo["wandb"]["project"], ppo["wandb"]["upload_model"]
     cfg.max_iterations = ppo["critic_warmup"]["iterations"] + ppo["finetune"]["iterations"]
     ft = ppo["finetune"]
     cfg.algorithm.learning_rate, cfg.algorithm.schedule = ft["learning_rate"], ft["schedule"]
     cfg.algorithm.desired_kl, cfg.algorithm.entropy_coef = ft["desired_kl"], ft["entropy_coef"]
     return cfg
+
+
+def set_wandb_environment(wandb: dict, family: str, run_dir: Path):
+    """rsl_rl's W&B writer takes only the project from its config and leaves entity, tags, group, mode and
+    local folder to wandb.init, which reads them from the WANDB_* environment variables: set them from
+    training.yaml. The W&B run is named after the run folder, and its local files stay inside it."""
+    env = {"WANDB_ENTITY": wandb["entity"], "WANDB_RUN_GROUP": wandb["group"], "WANDB_MODE": wandb["mode"],
+           "WANDB_TAGS": ",".join([*wandb["tags"], family]), "WANDB_DIR": run_dir}
+    os.environ.update({k: str(v) for k, v in env.items() if v})
 
 
 def _set_learning_rate(alg, schedule: str, learning_rate: float):
@@ -110,9 +122,12 @@ def train_specialist(family: str, ppo: dict, run_dir: Path, device: str):
     from steerduck.policy import actor_onnx_difference, onnx_to_rsl_rl_actor, resolve
 
     configure_torch_backends()
+    set_wandb_environment(ppo["wandb"], family, run_dir)
     env_cfg, rl_cfg = make_env_cfg(ppo["families"][family], ppo), make_rl_cfg(ppo)
     env = RslRlVecEnvWrapper(ManagerBasedRlEnv(cfg=env_cfg, device=device), clip_actions=rl_cfg.clip_actions)
-    runner = MicroduckOnPolicyRunner(env, asdict(rl_cfg), str(run_dir), device)
+    # our training.yaml section rides along in the runner config, which the W&B writer uploads as train_cfg
+    train_cfg = asdict(rl_cfg) | {"steerduck": {"family": family, **ppo}}
+    runner = MicroduckOnPolicyRunner(env, train_cfg, str(run_dir), device)
 
     # start: the actor of the evaluated policy, checked against its ONNX; critic and optimizer are new
     onnx_path = resolve(ppo["init_controller"])["path"]
