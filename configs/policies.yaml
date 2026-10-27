@@ -2,11 +2,20 @@
 #   type  onnx: a policy file run with onnxruntime
 #   hf    [repo, file] on Hugging Face, downloaded once to models/<name>/
 #   path  or a file relative to models/
+#   checkpoint  [repo, file] of the full rsl_rl training checkpoint (actor, critic, normalizers, action std,
+#               optimizer) on Hugging Face, downloaded once to models/<name>/: the start of a PPO fine-tuning
 
 alpha_walking:
   type: onnx
   hf: [pollen-robotics/microduck-policies, alpha_walking.onnx]
+  # W&B run pollen-robotics/mjlab_microduck/441tzs6d, iteration 3750, task Mjlab-Velocity2-Rough-Backlash-MicroDuck,
+  # microduck_rl commit 2f1f76bc6; its actor gives the actions of alpha_walking.onnx (max difference 4e-6)
+  checkpoint: [pollen-robotics/microduck-training, bundles/velocity2/441tzs6d_3750/model_3750.pt]
 
 rough_walk_g:
   type: onnx
   hf: [RemiFabre/microduck-rough-walk-g, policy.onnx]
+
+slope_down-20261022-1815:
+  type: onnx
+  hf: [mpreda/slope_down-20261022-1815, 20261022-1815_train_ppo_slope_down.onnx]

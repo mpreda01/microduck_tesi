@@ -101,7 +101,7 @@ def main():
     episodes.to_parquet(run_dir / "episodes.parquet", index=False)
     config.write_manifest(run_dir, status="done", runtime_s=time.time() - t0, episodes=len(episodes), **info)
     log.info(f"done in {(time.time() - t0) / 60:.1f} min -> {run_dir}\n"
-             f"table: python scripts/report.py --phase 1 --run {run_dir.name}")
+             f"table: python scripts/report.py --run {run_dir.name}")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,13 @@
 """Train the components of the method (REPO_STRUCTURE.md, section 5). Phase 2: `ppo`.
 
-`ppo --situation <family>` fine-tunes a specialist policy from alpha_walking on one family of
-configs/training.yaml (critic warm-up with the actor frozen, then PPO). Writes runs/<YYYYMMDD-HHMM>_train_ppo_<family>/:
-config.yaml, run.json, log.txt, init_actor.pt (the actor rebuilt from the ONNX), the checkpoints
-model_<it>.pt, <run_id>.onnx (the latest checkpoint) and the tensorboard logs.
+`ppo --situation <family>` fine-tunes a specialist policy with PPO on one family of configs/training.yaml,
+starting from alpha_walking's training checkpoint (actor and critic). Writes runs/<YYYYMMDD-HHMM>_train_ppo_<family>/:
+config.yaml, run.json, log.txt, the checkpoints model_<it>.pt, <run_id>.onnx (the latest checkpoint) and the
+tensorboard logs.
 
 Examples:
     python scripts/train.py ppo --situation slope_down
-    python scripts/train.py ppo --situation slope_down --num-envs 32 --warmup-iterations 2 --finetune-iterations 2
+    python scripts/train.py ppo --situation slope_down --num-envs 32 --finetune-iterations 2
 """
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ def parse_args():
     ppo = commands.add_parser("ppo", help="fine-tune a specialist policy with PPO")
     ppo.add_argument("--situation", required=True, help="family of configs/training.yaml (ppo.families)")
     ppo.add_argument("--num-envs", type=int, help="parallel environments (default: training.yaml's)")
-    ppo.add_argument("--warmup-iterations", type=int, help="critic warm-up iterations (default: training.yaml's)")
     ppo.add_argument("--finetune-iterations", type=int, help="fine-tuning iterations (default: training.yaml's)")
     ppo.add_argument("--device", help="cuda:0, cpu... (default: cuda:0 if available)")
     return p.parse_args()
@@ -41,8 +40,6 @@ def main():
         raise SystemExit(f"unknown family {args.situation!r}; known: {', '.join(ppo['families'])}")
     if args.num_envs is not None:
         ppo["num_envs"] = args.num_envs
-    if args.warmup_iterations is not None:
-        ppo["critic_warmup"]["iterations"] = args.warmup_iterations
     if args.finetune_iterations is not None:
         ppo["finetune"]["iterations"] = args.finetune_iterations
     device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")

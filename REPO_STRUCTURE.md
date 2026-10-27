@@ -55,10 +55,10 @@ tesi/
 
 Circa **16 file Python** in tutto. I moduli e gli script si creano quando serve la fase corrispondente, non prima.
 
-**Stato (20 ottobre 2026).**
+**Stato (27 ottobre 2026).**
 - Fase 1, dalla migrazione di `notebooks/fase_1.ipynb`: `configs/situations.yaml`, `policies.yaml`, `eval.yaml`; `steerduck/config.py`, `scene.py`, `rollout.py`, `policy.py` (che contiene anche gli hook che *leggono* le activation), `report.py`; `scripts/evaluate.py`, `scripts/report.py`.
-- Fase 2: `configs/training.yaml` (sezione `ppo`), `steerduck/mjlab_tasks.py`, `scripts/train.py ppo`, per ora con la sola famiglia `slope_down`.
-- Test: `tests/test_sanity.py` con `test_policy_equivalence` e `test_rsl_rl_actor_equivalence`.
+- Fase 2: `configs/training.yaml` (sezione `ppo`), `steerduck/mjlab_tasks.py`, `scripts/train.py ppo`, per ora con la sola famiglia `slope_down`. Il fine-tuning parte dal checkpoint di training di `alpha_walking` pubblicato da Pollen (`checkpoint` in `policies.yaml`).
+- Test: `tests/test_sanity.py` con `test_policy_equivalence` e `test_checkpoint_actor_equivalence`.
 - Mancano ancora: `steering.py`, `distill.py`, `interpret.py`, `recognizer.py`, `convert.py`, le altre sezioni di `training.yaml` e gli altri due test, che arrivano con le fasi 3-6.
 
 ---
@@ -99,18 +99,18 @@ In fondo al file ci sono le **suite**, cioè gruppi di situazioni usati insieme 
 | `library` | Le situazioni scelte a fine fase 1 | Fasi 2-5 |
 | `all` | Tutto, predefinita | Fase 1 |
 
-**`policies.yaml`** — il registro dei Controller: a ogni nome corrisponde un tipo (`onnx`, `mlp`, `adapter`, `system`, `switch`, `clae`, `residual`, `student`) e i file di `models/` da cui costruirlo (`path`, o `hf: [repo, file]` da scaricare). Una policy appena addestrata si valuta prima di promuoverla con `run: <run_id>`, che punta all'ONNX esportato dal run. Gli script ricevono solo il nome (`--controller system`) e non conoscono mai un percorso.
+**`policies.yaml`** — il registro dei Controller: a ogni nome corrisponde un tipo (`onnx`, `mlp`, `adapter`, `system`, `switch`, `clae`, `residual`, `student`) e i file di `models/` da cui costruirlo (`path`, o `hf: [repo, file]` da scaricare). Una policy può avere anche `checkpoint: [repo, file]`, il checkpoint di training rsl_rl completo (attore, critic, normalizzazioni, std delle azioni, ottimizzatore) da cui riparte il PPO: per `alpha_walking` è `pollen-robotics/microduck-training`, `bundles/velocity2/441tzs6d_3750/model_3750.pt` (run W&B `441tzs6d`, iterazione 3750). Una policy appena addestrata si valuta prima di promuoverla con `run: <run_id>`, che punta all'ONNX esportato dal run. Gli script ricevono solo il nome (`--controller system`) e non conoscono mai un percorso.
 
 **`eval.yaml`** — simulatore e protocollo degli episodi, comuni a ogni valutazione: passo fisico, decimazione, motori bam, soglia di caduta, dimensioni dei terreni, comando di velocità, heading hold, tensione della batteria, rumore iniziale, warm-up, rumore gaussiano sulle azioni (`action_noise_std`, per scegliere il rumore di esplorazione del PPO), suite, numero di episodi, semi, cosa registrare, video (per un elenco di situazioni, per tutte, oppure `one_per_family`: la prima situazione di ogni blocco di `situations.yaml`), criterio del report ("peggiore del riferimento"). Le opzioni da riga di comando di `evaluate.py` sovrascrivono suite, episodi, rumore sulle azioni, registrazione, video e processi.
 
 **`training.yaml`** — un file con quattro sezioni:
 - `ppo`: le specialiste della fase 2. Contiene:
-  - la policy di partenza (`init_controller: alpha_walking`, da `policies.yaml`) e il rumore d'azione iniziale `action_std`, che non è nell'ONNX e si sceglie con `evaluate.py --action-noise`;
+  - la policy di partenza (`init_controller: alpha_walking`, da `policies.yaml`): si caricano tutti i dati del suo `checkpoint`, compreso il rumore d'azione;
   - ambienti, seme, frequenza dei checkpoint;
   - il logging su Weights & Biases (blocco `wandb`): progetto, entity, gruppo, tag (si aggiunge la famiglia), modalità `online`/`offline`, caricamento dei checkpoint. Il run W&B prende il nome della cartella del run e salva i suoi file dentro di essa; il suo config contiene tutta la sezione `ppo`;
   - il caricamento su Hugging Face (blocco `huggingface`: attivo o no, namespace, privato): a fine training la specialista va nel repo `<namespace>/<famiglia>-<AAAAMMGG-HHMM>`, con lo stesso timestamp della cartella del run e del run W&B;
   - le opzioni di ricompensa del task hostile di microduck_rl (`feet`, `track`, `progress`);
-  - le due fasi: `critic_warmup` (iterazioni e learning rate del solo critic) e `finetune` (iterazioni, learning rate, schedule, KL, entropia);
+  - il PPO in `finetune` (iterazioni, learning rate, schedule, KL, entropia), su attore e critic insieme dalla prima iterazione;
   - la scala di terreni (dimensione dei patch, righe, quota di piano);
   - le `families`: per ogni specialista, i terreni con le chiavi di `situations.yaml`, dove un valore `[facile, difficile]` cresce lungo le righe della scala.
 
@@ -128,12 +128,12 @@ In fondo al file ci sono le **suite**, cioè gruppi di situazioni usati insieme 
 | `config.py` | Caricamento dei YAML ed espansione di `situations.yaml` in situazioni, selezione per suite, seme di una situazione, percorsi canonici di `models/`, `data/`, `runs/`, `results/`, creazione della cartella di un run, manifest `run.json`, logging. Nessun altro file scrive percorsi a mano. |
 | `scene.py` | Una voce di `situations.yaml` → un modello MuJoCo: terreno (compresi i due heightfield scritti per la tesi, piramide a facce piane e striscia piano → pendenza → piano), robot, carico, attrito di piedi **e** pavimento, motori bam. Tiene lo stato della situazione durante l'episodio e applica l'evento all'istante previsto. Espone le 61 osservazioni e lo stato misurato dal simulatore. |
 | `rollout.py` | Il ciclo di simulazione: esegue gli episodi di **qualsiasi** Controller, in parallelo su più processi, e restituisce una riga per episodio con tutte le metriche (errore di velocità, potenza, caduta entro 2 s, metriche dopo l'evento). Con la registrazione attiva salva anche ogni passo in `data/`; con il video attivo salva un mp4 e l'immagine della partenza. Lo usano la valutazione, la raccolta dei dataset e i cicli DAgger. |
-| `policy.py` | L'interfaccia Controller (`reset`, `act`, `activations`, `episode_diagnostics`), il Controller ONNX, la ricostruzione in PyTorch del grafo ONNX (MLP 61 → 512 → 256 → 128 → 14 con la normalizzazione degli input) con gli hook che leggono i tre hidden layer `h1`, `h2`, `h3`, e il registro: `resolve(nome)` (scarica la policy se serve) e `build_controller`, l'unico punto in cui i pezzi vengono assemblati. Per la fase 2 anche la ricostruzione dell'attore di rsl_rl dall'ONNX (`onnx_to_rsl_rl_actor`: pesi, normalizzazione congelata, rumore d'azione scelto) e il controllo che dia le stesse azioni dell'ONNX (`actor_onnx_difference`). |
+| `policy.py` | L'interfaccia Controller (`reset`, `act`, `activations`, `episode_diagnostics`), il Controller ONNX, la ricostruzione in PyTorch del grafo ONNX (MLP 61 → 512 → 256 → 128 → 14 con la normalizzazione degli input) con gli hook che leggono i tre hidden layer `h1`, `h2`, `h3`, e il registro: `resolve(nome)` (scarica la policy se serve) e `build_controller`, l'unico punto in cui i pezzi vengono assemblati. Per la fase 2 anche `resolve_checkpoint(nome)` (scarica il checkpoint di training di una policy) e il controllo che l'attore di un checkpoint dia le stesse azioni dell'ONNX (`actor_onnx_difference`). |
 | `steering.py` | I forward hook che leggono e modificano le activation; le quattro forme di adapter con **la stessa API** (`apply(h, α)`, layer di destinazione, limite di sicurezza): vettore costante, LoRA di rango 1, piccola rete, forma guidata dal SAE — con α = 0 ciascuna restituisce esattamente la policy originale. Più il router, che somma gli adapter pesati dal riconoscitore, li limita e non applica nulla quando il riconoscitore è incerto, nelle tre modalità `prob`, `oracle` e `switch`. |
 | `distill.py` | Il ciclo DAgger, generico rispetto a chi impara: dataset iniziale dalla specialista, ottimizzazione dei soli parametri dell'allievo, rollout dell'allievo, etichettatura con la specialista, ripetizione fino al criterio di stop. Addestra le quattro forme di adapter e la policy allievo con memoria. |
 | `interpret.py` | Il SAE (TopK/BatchTopK) e i probe lineari. Dà un nome agli elementi del dictionary confrontandoli con il ground truth, sceglie le feature rilevanti per ogni situazione, scompone un vettore costante negli elementi del dictionary, le estrae come input del riconoscitore. |
 | `recognizer.py` | Le finestre temporali costruite dai passi registrati e la piccola rete con due uscite: probabilità delle situazioni e stima di pendenza e attrito. Mantiene la finestra durante l'esecuzione, così il router la usa direttamente. |
-| `mjlab_tasks.py` | Il training su GPU con mjlab. Contiene:<br>• le **stesse** voci di `situations.yaml` come terreni mjlab: `LadderTerrainCfg` usa `scene.make_subterrain` della valutazione, con i valori `[facile, difficile]` interpolati lungo le righe;<br>• il task hostile di microduck_rl (ricompensa, modalità fine-tuning, promozione sulla scala) con la scala di una famiglia (`make_env_cfg`) e la sua configurazione PPO (`make_rl_cfg`);<br>• il fine-tuning di una specialista (`train_specialist`): attore ricostruito dall'ONNX e verificato, poi riscaldamento del solo critic con l'attore congelato e learning rate fisso, poi PPO completo, tutto in un solo run rsl_rl;<br>• il caricamento della specialista su Hugging Face (`upload_to_huggingface`): ONNX, ultimo checkpoint, `config.yaml`, `run.json` e una scheda del modello.<br>I task si costruiscono direttamente, senza registrarli in mjlab, e `external/microduck_rl` non si tocca. Più avanti: eventi di attrito e carico, wrapper con la policy frozen per le baseline RL (`activation` in stile CLAE e `action` residual). |
+| `mjlab_tasks.py` | Il training su GPU con mjlab. Contiene:<br>• le **stesse** voci di `situations.yaml` come terreni mjlab: `LadderTerrainCfg` usa `scene.make_subterrain` della valutazione, con i valori `[facile, difficile]` interpolati lungo le righe;<br>• il task hostile di microduck_rl (ricompensa, modalità fine-tuning, promozione sulla scala) con la scala di una famiglia (`make_env_cfg`) e la sua configurazione PPO (`make_rl_cfg`);<br>• il fine-tuning di una specialista (`train_specialist`): carica dal checkpoint di `alpha_walking` attore, critic, normalizzazioni, std delle azioni e ottimizzatore (non l'iterazione: il run conta da 0), verifica l'attore contro l'ONNX, imposta il learning rate di `finetune` e fa PPO;<br>• il caricamento della specialista su Hugging Face (`upload_to_huggingface`): ONNX, ultimo checkpoint, `config.yaml`, `run.json` e una scheda del modello.<br>I task si costruiscono direttamente, senza registrarli in mjlab, e `external/microduck_rl` non si tocca. Più avanti: eventi di attrito e carico, wrapper con la policy frozen per le baseline RL (`activation` in stile CLAE e `action` residual). |
 | `report.py` | Dagli `episodes.parquet` dei run: medie, minimi e massimi sui semi, vantaggio recuperato, degrado sul piano, costo di una situazione nuova; e tutte le figure della tesi con stile e nomi uniformi. |
 
 ---
@@ -145,16 +145,16 @@ Ogni script legge una config, crea la cartella del run, chiama la libreria, salv
 | Comando | Cosa fa |
 |---|---|
 | `evaluate.py <controller> [...]` | **Valutazione e raccolta dati, per tutti i metodi.** `--suite`, `--only`, `--episodes`, `--workers`, `--action-noise`, `--no-record`, `--no-activations`, `--no-video`, `--preview` (solo l'immagine della partenza, per controllare a occhio i terreni), `--name`. Dalla fase 3 `--alpha` (prova di steering). |
-| `train.py ppo\|distill\|sae\|recognizer` | **Tutto ciò che si addestra.** `ppo --situation <s>` per le specialiste, `ppo --baseline clae\|residual`; `distill --form const\|lora1\|smallnet\|sae_guided --layer h1\|h2\|h3\|all --situation <s>`, `distill --student`; `sae`; `recognizer --window 2`. Esiste per ora `ppo --situation <famiglia>`, con `--num-envs`, `--warmup-iterations`, `--finetune-iterations`, `--device`. Alla fine carica la specialista su Hugging Face (se attivo in `training.yaml`, e scrive il repo in `run.json`) e stampa la voce `run:` da aggiungere a `policies.yaml` per valutarla con `evaluate.py`. |
-| `report.py` | Rigenera **tutte** le tabelle e le figure di `results/`. `--phase`, `--run` (altrimenti i run di `results/runs_used.yaml`); più avanti `--all`. |
-| `convert.py` | La conversione ONNX → attore rsl_rl della fase 2 non ne ha bisogno: la fa `train.py`, verificandola sul runner, e la controlla `test_rsl_rl_actor_equivalence`. In fase 6, `--export system` produce il grafo ONNX unico con policy, riconoscitore, router e libreria. |
+| `train.py ppo\|distill\|sae\|recognizer` | **Tutto ciò che si addestra.** `ppo --situation <s>` per le specialiste, `ppo --baseline clae\|residual`; `distill --form const\|lora1\|smallnet\|sae_guided --layer h1\|h2\|h3\|all --situation <s>`, `distill --student`; `sae`; `recognizer --window 2`. Esiste per ora `ppo --situation <famiglia>`, con `--num-envs`, `--finetune-iterations`, `--device`. Alla fine carica la specialista su Hugging Face (se attivo in `training.yaml`, e scrive il repo in `run.json`) e stampa la voce `run:` da aggiungere a `policies.yaml` per valutarla con `evaluate.py`. |
+| `report.py` | `--run <run> [<run> ...]` (obbligatorio): la tabella dei run indicati e il criterio "peggiore del riferimento", in `results/tables/<run>.csv` (più run uniti da `+`), così la tabella di un run non sovrascrive quella di un altro. |
+| `convert.py` | Nella fase 2 non serve: il PPO parte dal checkpoint di training di `alpha_walking`, il cui attore è verificato contro l'ONNX da `train.py` e da `test_checkpoint_actor_equivalence`. In fase 6, `--export system` produce il grafo ONNX unico con policy, riconoscitore, router e libreria. |
 
 ### I comandi, fase per fase
 
 | Fase | Comandi |
 |---|---|
 | 0. Setup | `convert --import` · `evaluate alpha --suite card110` · `evaluate rough_walk_g --suite card110` · un `train ppo` breve per i tempi |
-| 1. Benchmark | `evaluate --preview` · `evaluate alpha_walking [rough_walk_g]` · `report --phase 1` |
+| 1. Benchmark | `evaluate --preview` · `evaluate alpha_walking [rough_walk_g]` · `report --run <run>` |
 | 2. Specialiste | `evaluate alpha_walking --suite flat --action-noise <σ>` (scelta del rumore) · `train ppo --situation <famiglia>` per ogni famiglia · `evaluate specialist_<famiglia> --record` |
 | 3. Libreria | `train sae` · `train distill --form … --layer …` · `evaluate alpha+<adapter> --alpha 0,…,1.5` |
 | 4. Sistema | `train recognizer` · `evaluate system` e `evaluate system_oracle --suite fixed,transitions,combined` |
@@ -171,7 +171,7 @@ Le funzioni di test stanno in un unico file. Si eseguono con `uv run --project m
 | Test | Cosa verifica | Perché |
 |---|---|---|
 | `test_policy_equivalence` | PyTorch e ONNX danno le stesse uscite (differenza < 10⁻⁵), normalizzazione inclusa. | Senza, ogni risultato successivo è inaffidabile. |
-| `test_rsl_rl_actor_equivalence` | L'attore di rsl_rl ricostruito dall'ONNX di `alpha_walking` dà le stesse azioni dell'ONNX (< 10⁻⁵). | È il punto di partenza di ogni specialista: deve essere la policy valutata nella fase 1. `train.py` ripete il controllo sul runner vero. |
+| `test_checkpoint_actor_equivalence` | L'attore del checkpoint di training di `alpha_walking` dà le stesse azioni dell'ONNX (< 10⁻⁵). | È il punto di partenza di ogni specialista: deve essere la policy valutata nella fase 1. `train.py` ripete il controllo sul runner vero. |
 | `test_zero_adapter` | Con α = 0, ogni forma di adapter e il router incerto restituiscono esattamente le azioni della policy originale. | "Nessuna correzione" deve significare davvero la policy validata. |
 | `test_conditions` | Dalla stessa voce di `situations.yaml`, simulatore CPU e mjlab producono lo stesso attrito e la stessa massa. La geometria è la stessa per costruzione, perché entrambi usano `scene.make_subterrain`. | È l'unico punto in cui una situazione viene tradotta due volte. |
 
@@ -187,8 +187,8 @@ runs/<AAAAMMGG-HHMM>_<comando>_<nome>/
 ├── run.json           commit git, stato "dirty", semi, hardware, versioni, durata
 ├── log.txt
 ├── episodes.parquet   una riga per episodio (se c'è una valutazione)
-├── model_<it>.pt      i checkpoint (se è un training): train ppo ne salva ogni save_interval iterazioni,
-├── <run_id>.onnx      più init_actor.pt (l'attore di partenza) e l'ONNX dell'ultimo checkpoint
+├── model_<it>.pt      i checkpoint (se è un training): train ppo ne salva ogni save_interval iterazioni
+├── <run_id>.onnx      l'ONNX dell'ultimo checkpoint
 ├── events.out.*       le curve di training (tensorboard), copiate anche su W&B
 ├── wandb/             i file locali del run W&B (da sincronizzare se offline)
 └── curves.parquet     curve dei cicli DAgger (fase 3)

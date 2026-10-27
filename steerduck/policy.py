@@ -146,36 +146,9 @@ def hidden_layers(model) -> list:
     return elus
 
 
-NORMALIZER_EPS = 1e-2       # rsl_rl's EmpiricalNormalization: (x - mean) / (std + eps)
-FROZEN_COUNT = 10 ** 15     # samples "already seen" by the normalizer (see onnx_to_rsl_rl_actor)
-
-
-def onnx_to_rsl_rl_actor(path, action_std: float) -> dict:
-    """State dict of rsl_rl's actor (MLPModel, rsl_rl 5) rebuilt from the ONNX of a Microduck policy, to
-    fine-tune a policy whose training checkpoint is not available. The ONNX holds the four Linear layers
-    and the observation normalization (x - mean) / (std + eps). It does not hold the action std, chosen
-    here, nor the critic, which training builds from scratch.
-    rsl_rl keeps updating the normalizer with weight batch / count: with count 0 the first batch would
-    replace the statistics the weights were trained with, so count is set so high that it never moves."""
-    import torch
-    model = onnx_to_torch(path)
-    norm = [m for m in model if hasattr(m, "op")]
-    linears = [m for m in model if isinstance(m, torch.nn.Linear)]
-    if [m.op for m in norm] != ["Sub", "Div"] or len(linears) != 4:
-        raise ValueError(f"{path}: expected input normalization (Sub, Div) and 4 linear layers")
-    std = norm[1].c - NORMALIZER_EPS
-    state = {"obs_normalizer._mean": norm[0].c.clone(), "obs_normalizer._var": std ** 2,
-             "obs_normalizer._std": std, "obs_normalizer.count": torch.tensor(FROZEN_COUNT),
-             "distribution.std_param": torch.full((linears[-1].out_features,), float(action_std))}
-    for index, layer in zip((0, 2, 4, 6), linears):   # nn.Sequential indices of rsl_rl's MLP (ELU in between)
-        state[f"mlp.{index}.weight"] = layer.weight.detach().clone()
-        state[f"mlp.{index}.bias"] = layer.bias.detach().clone()
-    return state
-
-
 def actor_onnx_difference(actor, path, n: int = 10_000) -> float:
     """Largest difference between the deterministic output of an rsl_rl actor and onnxruntime on the same
-    random observations: the rebuilt actor must be the policy evaluated in phase 1 (< 1e-5)."""
+    random observations: the actor of a training checkpoint must be the policy evaluated in phase 1 (< 1e-5)."""
     import onnxruntime as ort
     import torch
     from tensordict import TensorDict
@@ -211,6 +184,21 @@ def resolve(name: str) -> dict:
     if not Path(path).exists():
         raise FileNotFoundError(f"controller {name!r}: {path} not found")
     return {"name": name, "type": entry["type"], "path": str(path)}
+
+
+def resolve_checkpoint(name: str) -> str:
+    """-> path of the rsl_rl training checkpoint of controller `name` (its `checkpoint` in policies.yaml),
+    downloaded to models/<name>/ if needed. Separate from resolve, which evaluation calls: it needs only
+    the ONNX."""
+    entry = load_yaml(CONFIGS / "policies.yaml").get(name, {})
+    if "checkpoint" not in entry:
+        raise ValueError(f"controller {name!r} has no `checkpoint` in configs/policies.yaml")
+    repo, filename = entry["checkpoint"]
+    path = MODELS / name / filename
+    if not path.exists():
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(repo, filename, local_dir=str(MODELS / name))
+    return str(path)
 
 
 def build_controller(spec: dict, record_activations: bool = False) -> Controller:

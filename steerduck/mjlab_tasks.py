@@ -64,8 +64,8 @@ def make_rl_cfg(ppo: dict):
     cfg.seed, cfg.save_interval = ppo["seed"], ppo["save_interval"]
     cfg.logger = "wandb" if ppo["wandb"]["enabled"] else "tensorboard"
     cfg.wandb_project, cfg.upload_model = ppo["wandb"]["project"], ppo["wandb"]["upload_model"]
-    cfg.max_iterations = ppo["critic_warmup"]["iterations"] + ppo["finetune"]["iterations"]
     ft = ppo["finetune"]
+    cfg.max_iterations = ft["iterations"]
     cfg.algorithm.learning_rate, cfg.algorithm.schedule = ft["learning_rate"], ft["schedule"]
     cfg.algorithm.desired_kl, cfg.algorithm.entropy_coef = ft["desired_kl"], ft["entropy_coef"]
     return cfg
@@ -81,33 +81,11 @@ def set_wandb_environment(wandb: dict, family: str, run_dir: Path):
 
 
 def _set_learning_rate(alg, schedule: str, learning_rate: float):
+    """The loaded optimizer state carries the learning rate the checkpoint ended with: replace it with the
+    fine-tuning one (the fixed schedule would otherwise keep it)."""
     alg.schedule, alg.learning_rate = schedule, learning_rate
     for group in alg.optimizer.param_groups:
         group["lr"] = learning_rate
-
-
-def stage_critic_warmup(alg, warmup: dict, finetune: dict):
-    """The critic learns alone for the first warmup['iterations'] PPO updates: the actor (weights, normalizer
-    and action std) gets no gradient, and the learning rate is fixed (the adaptive schedule reads the KL
-    divergence of the actor, which does not move). Then the actor is released and the run goes on with the
-    fine-tuning schedule. Done by wrapping alg.update, so that both stages are one rsl_rl run and one log."""
-    if warmup["iterations"] == 0:
-        return
-    alg.actor.requires_grad_(False)
-    _set_learning_rate(alg, "fixed", warmup["learning_rate"])
-    update, done = alg.update, 0
-
-    def staged_update():
-        nonlocal done
-        losses = update()
-        done += 1
-        if done == warmup["iterations"]:
-            alg.actor.requires_grad_(True)
-            _set_learning_rate(alg, finetune["schedule"], finetune["learning_rate"])
-            log.info(f"critic warm-up done after {done} iterations: fine-tuning actor and critic")
-        return losses
-
-    alg.update = staged_update
 
 
 def upload_to_huggingface(run_dir: Path, family: str, ppo: dict) -> str:
@@ -144,13 +122,12 @@ def upload_to_huggingface(run_dir: Path, family: str, ppo: dict) -> str:
 def train_specialist(family: str, ppo: dict, run_dir: Path, device: str):
     """Fine-tune ppo['init_controller'] on one family. Checkpoints go to run_dir (model_<it>.pt) and the
     latest one also as <run_id>.onnx, the file configs/policies.yaml points to with `run: <run_id>`."""
-    import torch
     from mjlab.envs import ManagerBasedRlEnv
     from mjlab.rl import RslRlVecEnvWrapper
     from mjlab.utils.torch import configure_torch_backends
     from mjlab_microduck.tasks import MicroduckOnPolicyRunner
 
-    from steerduck.policy import actor_onnx_difference, onnx_to_rsl_rl_actor, resolve
+    from steerduck.policy import actor_onnx_difference, resolve, resolve_checkpoint
 
     configure_torch_backends()
     set_wandb_environment(ppo["wandb"], family, run_dir)
@@ -160,17 +137,18 @@ def train_specialist(family: str, ppo: dict, run_dir: Path, device: str):
     train_cfg = asdict(rl_cfg) | {"steerduck": {"family": family, **ppo}}
     runner = MicroduckOnPolicyRunner(env, train_cfg, str(run_dir), device)
 
-    # start: the actor of the evaluated policy, checked against its ONNX; critic and optimizer are new
+    # start: the training checkpoint of the evaluated policy (actor, critic, normalizers, action std, optimizer
+    # state), its actor checked against the ONNX. Not its iteration: this run counts its own from 0
     onnx_path = resolve(ppo["init_controller"])["path"]
-    init = run_dir / "init_actor.pt"
-    torch.save({"actor_state_dict": onnx_to_rsl_rl_actor(onnx_path, ppo["action_std"]), "iter": 0, "infos": None}, init)
-    runner.load(str(init), load_cfg={"actor": True}, map_location=device)
+    checkpoint = resolve_checkpoint(ppo["init_controller"])
+    runner.load(checkpoint, load_cfg={"actor": True, "critic": True, "optimizer": True}, map_location=device)
     diff = actor_onnx_difference(runner.alg.actor, onnx_path)
     if diff >= 1e-5:
-        raise ValueError(f"the rebuilt actor differs from {onnx_path} by {diff:.1e}")
-    log.info(f"actor rebuilt from {onnx_path}: largest difference from the ONNX {diff:.1e}")
+        raise ValueError(f"the actor of {checkpoint} differs from {onnx_path} by {diff:.1e}")
+    log.info(f"loaded {checkpoint}: largest difference of its actor from the ONNX {diff:.1e}")
 
-    stage_critic_warmup(runner.alg, ppo["critic_warmup"], ppo["finetune"])
+    ft = ppo["finetune"]
+    _set_learning_rate(runner.alg, ft["schedule"], ft["learning_rate"])
     runner.learn(num_learning_iterations=rl_cfg.max_iterations, init_at_random_ep_len=True)
     env.close()
     return diff

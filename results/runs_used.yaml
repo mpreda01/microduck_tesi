@@ -1,3 +1,3 @@
 # Runs used for the tables of the thesis (REPO_STRUCTURE.md, section 7): folder names under runs/.
-# `python scripts/report.py --phase 1` reads them from here; failed or test runs are simply not listed.
+# The record of which runs the thesis cites; failed or test runs are simply not listed.
 fase1: []

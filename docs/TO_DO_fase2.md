@@ -29,8 +29,8 @@ Il fine-tuning con PPO riparte da un **checkpoint rsl_rl** (`model_XXXX.pt`), ch
 
 Su Hugging Face c'è solo l'ONNX, cioè solo l'attore. Secondo il manifest della scheda di `rough-walk-e`, il checkpoint di `alpha_walking` è il run W&B `yr25mna4`, `model_9999.pt`, che non è pubblico. `docs/velstand_policy.md` di microduck_rl cita invece il run `441tzs6d`: la discrepanza va chiarita.
 
-- [ ] **Chiedere a Pollen (Rémi Fabre) il checkpoint `.pt` di `alpha_walking`** e verificare quale dei due run è quello rilasciato. È la strada più semplice e più pulita.
-- [ ] Una volta ottenuto, verificare che il checkpoint esportato in ONNX coincida con `alpha_walking.onnx` di Hugging Face (stessa uscita su 10.000 input casuali, < 10⁻⁵). Altrimenti la specialista non partirebbe dalla policy valutata nella fase 1.
+- [x] **Checkpoint `.pt` di `alpha_walking` trovato (27 ottobre 2026):** Pollen lo pubblica in `pollen-robotics/microduck-training`, bundle `velocity2/441tzs6d_3750` (run W&B `441tzs6d`, `model_3750.pt`), registrato come `checkpoint` di `alpha_walking` in `configs/policies.yaml`. Il run rilasciato è `441tzs6d`, non `yr25mna4`.
+- [x] Verificato: l'attore del checkpoint dà le stesse azioni di `alpha_walking.onnx` (differenza massima 4·10⁻⁶ su 10.000 input casuali); lo controllano `train.py` e `test_checkpoint_actor_equivalence`. Il PPO parte dal checkpoint completo, senza riscaldamento del critic: il piano B qui sotto non serve più.
 - [ ] **Piano B, se il checkpoint non arriva:** ricostruire un checkpoint rsl_rl dall'ONNX:
   1. copiare i pesi dell'attore e la normalizzazione degli input nell'`ActorCritic` di rsl_rl (la conversione ONNX → PyTorch di `steerduck/policy.py` già esiste);
   2. inizializzare il critic da zero;

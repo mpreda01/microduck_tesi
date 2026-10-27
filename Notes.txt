@@ -1,0 +1,6 @@
+la policy specialistica sembra essere addestrata correttamente al commit 636f634539b7341eeddcc9120cba9c3db3e51afe
+i risultato della specialistica sulla discesa con intervalli [2, 10] sono in runs/20261022-2317_evaluate_slope_down-20261022-1815_all
+
+PROBLEMA DI alpha_walking E POLICY SPECIALISTA:
+in salita con inclinazioni > 7° la policy non cade ma cammina sul posto,
+errore v = v_ref

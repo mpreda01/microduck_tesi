@@ -1,16 +1,12 @@
 # Training (REPO_STRUCTURE.md, section 3).
 #
 # ---- ppo: the specialist policies of phase 2 (scripts/train.py ppo --situation <family>) ----
-# Each specialist is alpha_walking fine-tuned with PPO on one family of situations. The training checkpoint
-# of alpha_walking is not public: the actor (weights + observation normalization) is rebuilt from its ONNX,
-# the critic is trained from scratch first, with the actor frozen (critic_warmup), then PPO fine-tunes both.
+# Each specialist is alpha_walking fine-tuned with PPO on one family of situations, starting from its training
+# checkpoint: actor, critic, observation normalizers, action std and optimizer state as Pollen left them.
 # The environment is microduck_rl's hostile-terrain walking task (its reward, fine-tune mode, ladder
 # promotion) with the terrain ladder of the family.
 ppo:
-  init_controller: alpha_walking   # configs/policies.yaml: its ONNX gives the actor
-  action_std: 0.05                 # exploration noise at the start (not in the ONNX): the largest that does not
-                                   # degrade flat walking (evaluate.py --action-noise, 20 episodes, 2026-10-20):
-                                   # 0.05 -> power +6 %, 0.1 -> +25 %, 0.2 -> +98 %, 0.3 -> +236 % and 1 fall
+  init_controller: alpha_walking   # configs/policies.yaml: its `checkpoint` is the start, its ONNX the check
   num_envs: 4096
   seed: 0
   wandb:                           # logging of the training runs; the tensorboard files are written in the run anyway
@@ -29,10 +25,7 @@ ppo:
   reward: {feet: false, track: false, progress: true}   # options of microduck_rl's hostile task:
                                    # feet = 3.5 cm foot swing, track = stricter speed tracking,
                                    # progress = anti-circling (promotion needs real displacement)
-  critic_warmup:                   # the critic learns alone: actor frozen, fixed learning rate
-    iterations: 300
-    learning_rate: 1.0e-3
-  finetune:                        # then actor and critic together
+  finetune:                        # PPO on actor and critic together
     iterations: 1000
     learning_rate: 1.0e-4
     schedule: adaptive             # adaptive | fixed
