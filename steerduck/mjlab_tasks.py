@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import numpy as np
 from mjlab.terrains.primitive_terrains import BoxFlatTerrainCfg
 from mjlab.terrains.terrain_generator import SubTerrainCfg, TerrainGeneratorCfg
 
@@ -19,34 +21,83 @@ from steerduck.scene import make_subterrain
 
 log = logging.getLogger("steerduck")
 
+HEADINGS_RAD = {"downhill": 0.0, "uphill": math.pi}   # world heading of the walk along the +x face of a pyramid
+
 
 def _is_range(value) -> bool:
     return isinstance(value, list) and len(value) == 2 and all(isinstance(v, (int, float)) for v in value)
 
 
+def face_start(pyramid, direction: str, margin_m: float) -> np.ndarray:
+    """Start on the centre line of the +x face of a face_slope pyramid (scene.FlatFacePyramidTerrainCfg), in
+    the patch frame: margin_m past the top platform (downhill) or margin_m from the edge (uphill). The ground
+    there is tan(slope) x (distance from the edge); one hfield cell more, so that the robot never starts
+    inside the ground and drops at most one cell."""
+    half_m = pyramid.size[0] / 2
+    centre_m = pyramid.platform_width / 2 + margin_m if direction == "downhill" else half_m - margin_m
+    z_m = math.tan(math.radians(pyramid.slope_deg)) * (half_m - centre_m + pyramid.horizontal_scale)
+    return np.array([half_m + centre_m, pyramid.size[1] / 2, z_m])
+
+
 @dataclass(kw_only=True)
 class LadderTerrainCfg(SubTerrainCfg):
     """A terrain of situations.yaml whose values written as [easy, hard] grow linearly with the difficulty
-    of the ladder row (mjlab's curriculum: one column per terrain, one row per difficulty)."""
+    of the ladder row (mjlab's curriculum: one column per terrain, one row per difficulty). A face_slope
+    moves the spawn origin from the top to the start of its direction (face_start)."""
     situation: dict
+    start_margin_m: float
 
     def function(self, difficulty, spec, rng):
         s = {k: v[0] + difficulty * (v[1] - v[0]) if _is_range(v) else v for k, v in self.situation.items()}
         sizes = {"patch_size_m": self.size[0], "face_slope_size_m": self.size[0], "strip_width_m": self.size[1]}
         sub, _ = make_subterrain(s, sizes)
         sub.size = self.size
-        return sub.function(difficulty, spec, rng)
+        output = sub.function(difficulty, spec, rng)
+        if s["terrain"] == "face_slope":
+            output.origin = face_start(sub, s["direction"], self.start_margin_m)
+        return output
+
+
+def family_heading(terrains: list[dict]) -> float:
+    """World heading [rad] the robot keeps on a family: the one of its direction, shared by all its terrains."""
+    directions = {s.get("direction") for s in terrains}
+    if len(directions) != 1 or not directions <= HEADINGS_RAD.keys():
+        raise ValueError(f"the terrains of a family need one direction among {list(HEADINGS_RAD)}, "
+                         f"got {sorted(map(str, directions))}")
+    return HEADINGS_RAD[directions.pop()]
+
+
+def set_straight_walking(cfg, heading_rad: float, command: dict):
+    """The command of the evaluation instead of microduck_rl's random one: forward speed only, heading held
+    at heading_rad, no standing or turning in place (the curriculum that sets the standing share is removed).
+    The robot starts on the line of the walk (no offset along x) with the same heading +- the jitter, so it
+    starts at the height of the spawn origin and walks only downhill or only uphill."""
+    twist = cfg.commands["twist"]
+    max_yaw = command["max_yaw_rate_rad_s"]
+    twist.ranges.lin_vel_x, twist.ranges.lin_vel_y = tuple(command["lin_vel_x_m_s"]), (0.0, 0.0)
+    twist.ranges.ang_vel_z, twist.ranges.heading = (-max_yaw, max_yaw), (heading_rad, heading_rad)
+    twist.heading_command, twist.rel_heading_envs = True, 1.0
+    twist.heading_control_stiffness = command["heading_stiffness"]
+    twist.rel_standing_envs = twist.rel_turn_in_place_envs = twist.rel_forward_envs = twist.rel_world_envs = 0.0
+    cfg.curriculum.pop("standing_envs")
+    jitter = math.radians(command["heading_jitter_deg"])
+    pose = cfg.events["reset_base"].params["pose_range"]
+    pose["x"], pose["yaw"] = (0.0, 0.0), (heading_rad - jitter, heading_rad + jitter)
 
 
 def make_env_cfg(terrains: list[dict], ppo: dict):
     """microduck_rl's hostile-terrain walking task (reward, fine-tune mode, ladder promotion) with the
-    terrain ladder of one family, plus a share of flat patches so that flat walking is not forgotten."""
+    terrain ladder of one family, plus a share of flat patches so that flat walking is not forgotten, and
+    the straight walk of the evaluation in the family's direction."""
     from mjlab_microduck.tasks.microduck_velocity_hostile_env_cfg import make_microduck_velocity_hostile_env_cfg
 
     cfg = make_microduck_velocity_hostile_env_cfg(finetune=True, **ppo["reward"])
+    set_straight_walking(cfg, family_heading(terrains), ppo["command"])
     t = ppo["terrain"]
     share = (1.0 - t["flat_proportion"]) / len(terrains)
-    sub_terrains = {f"{s['terrain']}_{i}": LadderTerrainCfg(proportion=share, situation=s) for i, s in enumerate(terrains)}
+    sub_terrains = {f"{s['terrain']}_{i}": LadderTerrainCfg(proportion=share, situation=s,
+                                                            start_margin_m=t["start_margin_m"])
+                    for i, s in enumerate(terrains)}
     sub_terrains["flat"] = BoxFlatTerrainCfg(proportion=t["flat_proportion"])
     cfg.scene.terrain.terrain_generator = TerrainGeneratorCfg(
         size=(t["patch_size_m"], t["patch_size_m"]), border_width=t["border_width_m"], num_rows=t["ladder_rows"],

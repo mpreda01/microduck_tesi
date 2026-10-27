@@ -31,11 +31,23 @@ ppo:
     schedule: adaptive             # adaptive | fixed
     desired_kl: 0.01
     entropy_coef: 0.0              # > 0 pushes the action std up, i.e. away from alpha_walking
-  terrain: {patch_size_m: 8.0, border_width_m: 4.0, ladder_rows: 8, flat_proportion: 0.15}
+  command:                         # as the evaluation (eval.yaml): walk straight along the slope, never stand or turn
+    lin_vel_x_m_s: [0.2, 0.4]      # forward speed, drawn again every 3-8 s (microduck_rl's resampling); no lateral.
+                                   # Around eval.yaml's 0.3; at 0.10-0.12 alpha_walking stands still (2026-10-27)
+    heading_jitter_deg: 5.0        # start heading +- this around the walking direction of the family
+    heading_stiffness: 1.0         # yaw-rate command = clip(k x heading error, +-max_yaw_rate), as heading_hold
+    max_yaw_rate_rad_s: 1.0
+  # patch_size_m: a face of a face_slope pyramid is patch/2 - 0.5 m long, more than the 8 m walked in 20 s at
+  # 0.4 m/s, so an episode stays on its face. start_margin_m: the start is this far from the top platform
+  # (downhill) or from the patch edge (uphill), on the centre line of the +x face.
+  terrain: {patch_size_m: 20.0, border_width_m: 4.0, ladder_rows: 8, flat_proportion: 0.15, start_margin_m: 0.5}
 
   # One specialist per family. Each terrain uses the keys of configs/situations.yaml; a value written as
-  # [easy, hard] grows linearly along the ladder rows (difficulty 0 -> 1). The robot starts at the centre
-  # of the patch: on a pyramid, the top, so walking in any direction is downhill.
+  # [easy, hard] grows linearly along the ladder rows (difficulty 0 -> 1). On face_slope, `direction` sets
+  # where the robot starts and the heading it keeps: downhill = from the top towards +x, uphill = from the
+  # +x edge towards the top. All the terrains of a family share one direction.
   families:
     slope_down:
-      - {terrain: face_slope, deg: [2.0, 10.0]}
+      - {terrain: face_slope, deg: [2.0, 10.0], direction: downhill}
+    slope_up:
+      - {terrain: face_slope, deg: [2.0, 10.0], direction: uphill}
