@@ -4,3 +4,23 @@ i risultato della specialistica sulla discesa con intervalli [2, 10] sono in run
 PROBLEMA DI alpha_walking E POLICY SPECIALISTA:
 in salita con inclinazioni > 7° la policy non cade ma cammina sul posto,
 errore v = v_ref
+
+considerazione del prof:
+Robot che resta in piedi ma cammina sul posto o gira in cerchio
+ 
+Sì, è un fallimento. Il comando chiede al robot di andare avanti a 0,3 m/s: se resta in piedi ma non si sposta, non ha fatto quello che gli abbiamo chiesto.
+ 
+Però tienilo distinto dalle cadute: conta separatamente quanti episodi finiscono con il robot a terra e quanti con il robot in piedi ma fermo. Serve per due motivi. Primo motivo: i due fallimenti non sono ugualmente gravi. Una caduta può rompere il robot. Pollen scrive nel codice di microduck_rl (microduck_velstand_env_cfg.py) che i Microduck reali continuano a rompere gli ingranaggi dei motori cadendo. Un robot fermo invece è intatto, e basta riprovare. Esempio dai tuoi dati, ciottoli da 1,9 cm:
+- alpha_walking cade in 16 episodi su 20 e negli altri 4 resta ferma;
+- rough-walk-g non cade mai, ma resta ferma in tutti e 20.
+Se conti solo "riuscito o fallito", le due policy risultano uguali: 20 fallimenti su 20. Contando a parte si vede che rough-walk-g è molto più sicura, anche se non riesce ad avanzare. Lo stesso varrà per i vettori: un vettore che trasforma le cadute in arresti è già un miglioramento, e con un conteggio unico non lo vedresti. Secondo motivo: ti dice se la situazione si può migliorare. Se nessuna policy avanza, come sui ciottoli, il limite potrebbe essere del robot stesso: in simulazione i piedi si alzano di circa 12 mm, meno dei 1,9 cm dei ciottoli. In quel caso una specialista potrebbe al massimo evitare le cadute, non far avanzare il robot.
+ 
+C'è poi un problema nella velocità che misuri oggi. È la velocità in avanti rispetto al corpo del robot, cioè quanto va veloce nella direzione in cui è rivolto in quel momento. Non dice dove sta andando. Un robot che cammina in cerchio è sempre rivolto nella direzione in cui cammina, quindi la sua velocità in avanti è normale, anche se dopo ogni giro torna al punto di partenza. Esempio: rough-walk-g con il 30% di carico di lato.
+Ti propongo questa regola:
+1) Misura l'avanzamento: quanti metri il robot ha guadagnato nella direzione richiesta, confrontando dove si trova a fine episodio con dove era partito. Per misurare l'avanzamento, a inizio episodio salverei la posizione del tronco nel mondo (x, y; in MuJoCo data.xpos del corpo del tronco) e il suo angolo di yaw θ, cioè la direzione in cui il robot guarda e che il correttore deve mantenere. A fine episodio calcolerei lo spostamento Δx, Δy e terrei solo la parte lungo quella direzione: avanzamento = Δx · cos θ + Δy · sin θ, in metri. È vicino a zero se il robot cammina sul posto o in cerchio, ed è negativo se arretra.
+2) Un episodio è riuscito se il robot non cade e avanza di almeno 1 m in 20 s (0,05 m/s in media; negli episodi da 30 s, almeno 1,5 m). Perché 1 m: sul pavimento piano alpha_walking avanza di circa 2 m in 20 s (0,103 m/s), quindi chiediamo almeno la metà dei metri che fa sul piano. Non usiamo il comando come riferimento (0,3 m/s, cioè 6 m in 20 s), perché alpha_walking non ci arriva nemmeno sul piano: fallirebbe sempre. La soglia di 1 m resta una scelta: per mostrare che non cambia le conclusioni, ripeti il conto anche con 0,5 m e 1,5 m.
+3) Per ogni episodio fallito scrivi il motivo, che si ricava da avanzamento e velocità in avanti:
+- caduta;
+- sul posto: avanzamento basso e velocità in avanti bassa (muove le gambe ma non si sposta);
+- fuori rotta: avanzamento basso ma velocità in avanti normale (cammina, ma non nella direzione richiesta, come nell'esempio del cerchio).
+4) La metrica principale diventa la percentuale di episodi riusciti. Velocità e potenza restano informazioni in più.

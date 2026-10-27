@@ -92,6 +92,7 @@ are in [configs/training.yaml](configs/training.yaml).
 |---|---|
 | Quick test of the training | `python scripts/train.py ppo --situation slope_down --num-envs 32 --finetune-iterations 2` |
 | Train a specialist (GPU) | `python scripts/train.py ppo --situation slope_down` |
+| Train every family (GPU) | `python scripts/train.py ppo --situation all` (one run per family, one after the other) |
 | Evaluate it | add `specialist_slope_down: {type: onnx, run: <run folder>}` to [configs/policies.yaml](configs/policies.yaml), then `python scripts/evaluate.py alpha_walking specialist_slope_down --suite fixed` |
 
 `train.py` writes `runs/<YYYYMMDD-HHMM>_train_ppo_<family>/` with the checkpoints
