@@ -2,18 +2,22 @@
 
 Walking metrics are averaged over the COMPLETED episodes only: during a fall they would measure the fall
 itself, so a situation where every episode falls has falls but no walking metrics.
+
+Each episode also gets a result (episode_results): success, or the reason it failed (fell, in_place,
+off_course), with the thresholds of configs/eval.yaml.
 """
 from __future__ import annotations
 
 import json
 import math
 
+import numpy as np
 import pandas as pd
 from scipy import stats
 
-from steerduck.config import find_run, load_situations, load_yaml
+from steerduck.config import CONFIGS, find_run, load_situations, load_yaml
 
-WALKING_METRICS = ("vel_error_m_s", "vel_error_1s_m_s", "path_speed_m_s", "yaw_rate_rad_s", "power_w",
+WALKING_METRICS = ("progress_m", "vel_error_m_s", "vel_error_1s_m_s", "path_speed_m_s", "yaw_rate_rad_s", "power_w",
                    "max_tilt_deg", "distance_m", "vel_error_after_event_m_s", "power_after_event_w")
 
 
@@ -37,19 +41,59 @@ def wilson_ci(k: int, n: int, z: float = 1.96):
     return 100 * max(0.0, centre - half), 100 * min(1.0, centre + half)
 
 
+def add_progress(episodes: pd.DataFrame) -> pd.DataFrame:
+    """progress_m: displacement along the start heading (heading_deg, the direction the heading hold keeps).
+    Unlike the forward speed in the body frame, it is about zero when the robot steps in place or walks in
+    circles, and negative when it walks backwards."""
+    theta = np.radians(episodes.heading_deg)
+    return episodes.assign(progress_m=(episodes.end_x - episodes.start_x) * np.cos(theta)
+                           + (episodes.end_y - episodes.start_y) * np.sin(theta))
+
+
+def episode_results(episodes: pd.DataFrame, min_progress_m_s: float) -> pd.Series:
+    """success | fell | nan | in_place | off_course for each episode. Success: completed, with a progress of at
+    least min_progress_m_s x the episode length. A completed episode without enough progress is in_place when
+    its forward speed in the body frame is also below min_progress_m_s (it steps without moving), off_course
+    when it walks at least that fast but not in the commanded direction (circles, drift)."""
+    enough = episodes.progress_m >= min_progress_m_s * episodes.duration_s
+    walking = episodes.path_speed_m_s >= min_progress_m_s
+    completed = np.where(enough, "success", np.where(walking, "off_course", "in_place"))
+    return pd.Series(np.where(episodes.outcome == "completed", completed, episodes.outcome), index=episodes.index)
+
+
+def add_results(episodes: pd.DataFrame) -> pd.DataFrame:
+    """progress_m, the result with min_progress_m_s of configs/eval.yaml (column `result`) and with each value of
+    min_progress_sensitivity_m_s (columns result_<value>m_s). The thresholds are read from the current
+    eval.yaml, not from the run: they judge the episodes, they do not change the simulation."""
+    criteria = load_yaml(CONFIGS / "eval.yaml")
+    episodes = add_progress(episodes)
+    episodes["result"] = episode_results(episodes, criteria["min_progress_m_s"])
+    for value in criteria["min_progress_sensitivity_m_s"]:
+        episodes[f"result_{value:g}m_s"] = episode_results(episodes, value)
+    return episodes
+
+
 def summarize(episodes: pd.DataFrame) -> pd.DataFrame:
-    """One row per (controller, situation), situations in the order of situations.yaml: falls with their
-    95% Wilson interval, mean and standard error of the walking metrics over the completed episodes."""
+    """One row per (controller, situation), situations in the order of situations.yaml: falls and successes
+    with their 95% Wilson interval, the count of each reason of failure, the success rate with the other
+    thresholds, mean and standard error of the walking metrics over the completed episodes."""
     situations = {s["name"]: s for s in load_situations()[0]}
     rows = []
     for (controller, situation), eps in episodes.groupby(["controller", "situation"], sort=False):
         n, falls = len(eps), int((eps.outcome == "fell").sum())
         lo, hi = wilson_ci(falls, n)
+        successes = int((eps.result == "success").sum())
+        success_lo, success_hi = wilson_ci(successes, n)
         done = eps[eps.outcome == "completed"]
         row = {"controller": controller, "situation": situation, "group": eps.group.iloc[0], "episodes": n,
+               "success": successes, "success_pct": 100 * successes / n,
+               "success_ci95_lo_pct": success_lo, "success_ci95_hi_pct": success_hi,
+               "in_place": int((eps.result == "in_place").sum()), "off_course": int((eps.result == "off_course").sum()),
                "falls": falls, "falls_pct": 100 * falls / n, "falls_ci95_lo_pct": lo, "falls_ci95_hi_pct": hi,
                "nan": int((eps.outcome == "nan").sum()), "mean_duration_s": eps.duration_s.mean(),
                "completed": len(done)}
+        for col in (c for c in eps if c.startswith("result_")):
+            row["success_pct_" + col.removeprefix("result_")] = 100 * (eps[col] == "success").mean()
         for key in WALKING_METRICS:
             values = done[key].dropna() if key in done else []
             if len(values):
@@ -104,6 +148,7 @@ def phase1(runs: list[str]):
     """Phase 1: the table, and the criterion "at least min_worse_groups situations where the policy gets
     measurably worse than the reference" -> (table, {controller: {group: [situations]}})."""
     episodes, conf = load_runs(runs)
+    episodes = add_results(episodes)
     table = compare_to_reference(summarize(episodes), episodes, conf)
     worse = table[table.worse & (table.group != "reference")]
     groups = {c: {g: w.situation.tolist() for g, w in worse[worse.controller == c].groupby("group")}

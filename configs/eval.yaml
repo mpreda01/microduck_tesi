@@ -51,3 +51,11 @@ min_worse_groups: 3               # phase 1 criterion: at least three situations
 worse_p_value: 0.01               # Welch test on velocity error and power
 worse_min_vel_error_increase_m_s: 0.02
 worse_min_power_ratio: 1.10
+
+# ---- report: success of an episode (steerduck/report.py; read from this file, so it applies to old runs too) ----
+# progress = displacement along the start heading (the one the heading hold keeps). An episode is a success if the
+# robot does not fall and progresses at least min_progress_m_s x the episode length. A completed episode that does
+# not is "in_place" if its forward speed in the body frame (path_speed_m_s) is also below min_progress_m_s, else
+# "off_course" (it walks, but in circles or astray).
+min_progress_m_s: 0.05            # half of alpha_walking's progress on flat ground (0.103 m/s): 1 m in 20 s
+min_progress_sensitivity_m_s: [0.025, 0.075]   # success rate also with these (0.5 m and 1.5 m in 20 s)

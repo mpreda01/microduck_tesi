@@ -25,7 +25,12 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(out, index=False, float_format="%.4g")
     print(f"{len(table)} rows -> {out}\n")
-    print(f"Situations where the controller is measurably worse than {conf['reference']} "
+    print("Episodes by result (all situations):")
+    for controller, rows in table.groupby("controller", sort=False):
+        n = rows.episodes.sum()
+        print(f"  {controller}: success {rows.success.sum()}/{n} ({100 * rows.success.sum() / n:.0f}%), "
+              f"fell {rows.falls.sum()}, in place {rows.in_place.sum()}, off course {rows.off_course.sum()}")
+    print(f"\nSituations where the controller is measurably worse than {conf['reference']} "
           f"(criterion: at least {conf['min_worse_groups']}):")
     for controller, groups in worse_groups.items():
         print(f"  {controller}: {len(groups)} situation(s): "
