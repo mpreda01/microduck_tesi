@@ -24,3 +24,34 @@ Ti propongo questa regola:
 - sul posto: avanzamento basso e velocità in avanti bassa (muove le gambe ma non si sposta);
 - fuori rotta: avanzamento basso ma velocità in avanti normale (cammina, ma non nella direzione richiesta, come nell'esempio del cerchio).
 4) La metrica principale diventa la percentuale di episodi riusciti. Velocità e potenza restano informazioni in più.
+
+DISTANZA DELLE SPECIALISTE DA alpha_walking (TO_DO_fase2.md, punto 5.3)
+commit: ec799b03e64ee2d3cc2d49b999adb2ff6d7defcd
+dati di input:
+- run di valutazione: runs/20261028-1648_evaluate_slope_up-20261028-0021+slope_down-20261027-2240_all_only
+  (dati per passo in data/ con lo stesso nome; 41 situazioni: flat, pyramid_*, pit_*, face_*_downhill, face_*_uphill;
+  20 episodi per situazione, seme 0, senza rumore sulle azioni)
+- specialiste registrate nel run: slope_down-20261027-2240 e slope_up-20261028-0021
+- policy che rivaluta le osservazioni: alpha_walking (configs/policies.yaml)
+comando: python scripts/action_distance.py --run 20261028-1648_evaluate_slope_up-20261028-0021+slope_down-20261027-2240_all_only --controller alpha_walking
+risultato: results/tables/action_distance__20261028-1648_evaluate_slope_up-20261028-0021+slope_down-20261027-2240_all_only__alpha_walking.csv
+controllo: slope_down rivalutata sui propri dati (flat, face_6deg_downhill) dà distanza esattamente 0
+
+errore quadratico medio tra le azioni, senza i passi a meno di 2 s da una caduta (mse_before_falls):
+                  slope_down  slope_up
+  piano             0.0095     0.0089
+  discese face      0.0130     0.0164
+  salite face       0.0077     0.0154
+  fosse (salita)    0.0081     0.0143
+  piramidi (disc.)  0.0113     0.0105
+
+considerazioni:
+- slope_up si allontana da alpha più di slope_down nella propria situazione: in salita circa 1,7 volte la distanza
+  sul piano (0,015 contro 0,009), slope_down in discesa circa 1,4 volte (0,013 contro 0,0095). Il vettore di
+  slope_up dovrà spostare di più: la distillazione con un vettore costante sarà probabilmente più difficile.
+- nessuna delle due è a distanza zero sul piano: le specialiste hanno cambiato un po' il passo ovunque, non solo
+  sul pendio. Il vettore si applica solo nella situazione, ma va riportato nella tesi.
+- slope_up sul piano differisce soprattutto sulla caviglia sinistra (0,044 contro circa 0,01 della destra):
+  differenza asimmetrica, da guardare nei video.
+- le cadute gonfiano la distanza: slope_up sulle pendenze vale 0,026 su tutti i passi e 0,014 senza i passi prima
+  di una caduta (le cadute sono le sue in discesa). Per giudicare la distillazione usare mse_before_falls.

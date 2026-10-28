@@ -102,7 +102,7 @@ and `run.json` with the GPU hours.
 
 `action_distance.py` measures how far a specialist is from `alpha_walking` on the states the specialist visited,
 without simulating: `alpha_walking` acts on the observations recorded by an evaluation run (so the run needs its
-per-step data, i.e. no `--no-record`), and the table `results/tables/<run>__<controller>.csv` gives the mean squared
+per-step data, i.e. no `--no-record`), and the table `results/tables/action_distance__<run>__<controller>.csv` gives the mean squared
 difference between the two actions per situation, without the steps just before a fall, and per joint. About
 1 minute for 40 situations x 20 episodes x 2 specialists.
 

@@ -1,7 +1,7 @@
 """Distance of the controllers of an evaluation run from another controller, on the states they visited
 (docs/TO_DO_fase2.md, 5.3; REPO_STRUCTURE.md, section 5). Nothing is simulated: the controller is run on the
 observations recorded in data/<run>/ and its actions are compared with the recorded ones.
-Writes results/tables/<run>__<controller>.csv.
+Writes results/tables/action_distance__<run>__<controller>.csv.
 
 Examples:
     python scripts/action_distance.py --run <run> --controller alpha_walking
@@ -27,7 +27,7 @@ def main():
 
     split = lambda names: names.split(",") if names else None   # noqa: E731
     table = report.action_distance(args.run, args.controller, split(args.source), split(args.only))
-    out = config.RESULTS / "tables" / f"{Path(args.run).name}__{args.controller}.csv"
+    out = config.RESULTS / "tables" / f"action_distance__{Path(args.run).name}__{args.controller}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(out, index=False, float_format="%.4g")
     print(f"{len(table)} rows -> {out}")
