@@ -55,3 +55,189 @@ considerazioni:
   differenza asimmetrica, da guardare nei video.
 - le cadute gonfiano la distanza: slope_up sulle pendenze vale 0,026 su tutti i passi e 0,014 senza i passi prima
   di una caduta (le cadute sono le sue in discesa). Per giudicare la distillazione usare mse_before_falls.
+
+SCELTA DEL CHECKPOINT DI slope_up: ITERAZIONE 400 CONTRO L'ULTIMA (999)
+commit: 2148d1729a048cfca25a080eb6229d638188fb55
+
+perché il dubbio:
+- nelle curve di training (events.out.tfevents.1793146904..., run 20261028-0021_train_ppo_slope_up) il reward
+  medio si ferma intorno a 125-128 già dall'iterazione ~250-300 e resta costante fino a 1000; anche la durata degli
+  episodi e il livello del curriculum sono stabili da lì in poi. L'ipotesi era che dopo l'iterazione ~400 la
+  specialista non cambi più in modo utile, e che un checkpoint precedente sia altrettanto buono ma più vicino ad
+  alpha_walking (TO_DO_fase2.md, punto 4.3: tra due checkpoint ugualmente buoni scegliere il più vicino).
+- reward costante però non vuol dire rete ferma: la std delle azioni continua a calare (0,07 all'iterazione 200,
+  0,045 alla 500, 0,03 alla 1000) e ogni aggiornamento PPO sposta la policy (KL circa 0,01). Andava misurato.
+
+dati di input:
+- training: runs/20261028-0021_train_ppo_slope_up (checkpoint model_400.pt e model_999.pt)
+- conversione: python scripts/convert.py checkpoint --run 20261028-0021_train_ppo_slope_up --iteration 400
+  -> runs/20261028-1912_convert_20261028-0021_train_ppo_slope_up_it400, policy slope_up-20261028-0021-it400 in
+  configs/policies.yaml. Controllo del metodo: model_999.pt convertito dà le stesse azioni dell'ONNX del run
+  (differenza 0).
+- valutazione del checkpoint 400: runs/20261028-1949_evaluate_slope_up-20261028-0021-it400_all_only, stesse 41
+  situazioni e stessi episodi (seme 0, 20 episodi) del run 20261028-1648 della specialista finale
+- tabella: results/tables/20261028-1949_evaluate_slope_up-20261028-0021-it400_all_only+20261028-1648_evaluate_slope_up-20261028-0021+slope_down-20261027-2240_all_only.csv
+- distanze: results/tables/action_distance__20261028-1949_evaluate_slope_up-20261028-0021-it400_all_only__alpha_walking.csv
+  e il file action_distance__20261028-1648...__alpha_walking.csv della sezione precedente
+
+prima misura, senza simulare: sugli stati di slope_up (run 1648) i due checkpoint differiscono poco
+(mse_before_falls it400 vs it999: piano 0,0013, salite face 0,0017, fosse 0,0016, discese face 0,0035), circa
+10 volte meno della distanza tra slope_up e alpha (0,009-0,016). L'intuizione era in gran parte giusta.
+
+risultati in simulazione:
+                                        it999 (finale)     it400
+  successi face_*_uphill e pit_*        100% ovunque       100% ovunque (1 caduta su pit_10deg)
+  avanzamento face uphill 3° -> 10°      3,93 -> 2,42 m     3,49 -> 1,72 m
+  avanzamento pit 3° -> 10°              4,07 -> 2,79 m     3,64 -> 2,01 m
+  errore di velocità (1 s), face uphill  0,10 -> 0,18 m/s   0,12 -> 0,21 m/s
+  potenza in salita                      1,85 -> 1,53 W     1,53 -> 1,15 W
+  piano: avanzamento, potenza            4,53 m, 2,60 W     4,12 m, 2,34 W
+  discesa (non è la sua situazione)      pyramid_5.5deg 0%, pyramid_5.5deg 65%,
+                                         face_4deg_downhill 20%  face_4deg_downhill 50%
+
+  distanza da alpha sui propri stati (mse_before_falls):
+                                        it999      it400
+  piano                                 0,0089     0,0067
+  salite face                           0,0154     0,0096
+  fosse (salita)                        0,0143     0,0093
+
+considerazioni:
+- in salita il success rate non distingue i due checkpoint: entrambi al 100%, mentre alpha_walking da 7° in su
+  resta ferma (in_place). Il finale sale più veloce (15-40% di metri in più, ben oltre l'errore standard di circa
+  0,01 m); il checkpoint 400 è più lento ma consuma meno.
+- il checkpoint 400 è più robusto in discesa: le ultime 600 iterazioni hanno specializzato ancora di più slope_up
+  sulla salita, a spese della discesa, che non vede in training.
+- nella propria situazione il checkpoint 400 è circa il 35% più vicino ad alpha_walking.
+
+giustificazione della scelta (it400 per la distillazione di slope_up):
+- la specialista serve come modello da imitare per un vettore che si somma alle activation di alpha_walking, con
+  i pesi di alpha_walking fissi (piano, sezione 3.2, passi 1 e 3). Più la specialista è vicina ad alpha_walking,
+  più piccola è la correzione che il vettore deve produrre: la distanza misurata è proprio l'errore da cui parte
+  la distillazione (vettore a zero). Un vettore costante, uguale in ogni stato, riproduce bene uno spostamento
+  piccolo e uniforme e male un cambiamento grande del passo.
+- con la metrica principale della tesi (percentuale di episodi riusciti) i due checkpoint sono ugualmente buoni
+  nella situazione: 100% contro 100%. La regola del punto 4.3 di TO_DO_fase2.md indica quindi il più vicino ad
+  alpha_walking, il checkpoint 400.
+- il vantaggio da recuperare con il vettore non cambia: alpha_walking fallisce (ferma) e la specialista riesce in
+  entrambi i casi, quindi il denominatore del vantaggio recuperato (piano, sezione 3.2, passo 5) è lo stesso.
+- slope_up era la specialista più lontana da alpha_walking (sezione precedente): scegliere il checkpoint più vicino
+  riduce proprio il rischio principale della sua distillazione.
+- costo della scelta, da dichiarare nella tesi: si rinuncia a parte della velocità in salita (avanzamento minore,
+  errore di velocità maggiore) in cambio di una specialista più facile da distillare.
+- la stessa verifica su slope_down è nella sezione seguente: anche per slope_down si sceglie il checkpoint 400.
+
+SCELTA DEL CHECKPOINT DI slope_down: ITERAZIONE 400 CONTRO L'ULTIMA (999)
+commit: 2148d1729a048cfca25a080eb6229d638188fb55 (codice invariato; cambiato solo configs/policies.yaml, con la
+voce slope_down-20261027-2240-it400)
+
+perché il test:
+- stessa regola di slope_up (TO_DO_fase2.md, punto 4.3), applicata alla stessa iterazione perché il confronto
+  sia simmetrico. Alla 400 il curriculum è già completo: il livello massimo della scala (7, pendenze vicine a 10°)
+  è raggiunto all'iterazione ~200 e il livello medio smette di salire verso la 270, quindi la policy ha già visto
+  tutte le pendenze del training.
+- a differenza di slope_up, il reward di slope_down non è piatto: sale piano anche dopo la 400
+  (iterazioni 200-250: 128,2; 350-400: 131,4; 450-500: 133,8; 700-750: 136,1; 950-1000: 136,6), circa +4%.
+  Ci si aspettava quindi un confronto meno netto, con il rischio di perdere qualcosa sulle discese più ripide.
+
+dati di input:
+- training: runs/20261027-2240_train_ppo_slope_down (checkpoint model_400.pt e model_999.pt)
+- conversione: python scripts/convert.py checkpoint --run 20261027-2240_train_ppo_slope_down --iteration 400
+  -> runs/20261028-2022_convert_20261027-2240_train_ppo_slope_down_it400, policy slope_down-20261027-2240-it400 in
+  configs/policies.yaml. Controllo del metodo: model_999.pt convertito dà le stesse azioni dell'ONNX del run
+  (differenza 0).
+- valutazione del checkpoint 400: runs/20261028-2025_evaluate_slope_down-20261027-2240-it400_all_only, stesse 41
+  situazioni e stessi episodi (seme 0, 20 episodi) del run 20261028-1648 della specialista finale
+- tabella: results/tables/20261028-2025_evaluate_slope_down-20261027-2240-it400_all_only+20261028-1648_evaluate_slope_up-20261028-0021+slope_down-20261027-2240_all_only.csv
+- distanze: results/tables/action_distance__20261028-2025_evaluate_slope_down-20261027-2240-it400_all_only__alpha_walking.csv
+  e il file action_distance__20261028-1648...__alpha_walking.csv (slope_down finale)
+
+risultati in simulazione, nella sua situazione (discesa), successi su 20 episodi:
+                                        it999 (finale)          it400
+  face_3deg -> face_8deg_downhill       20/20                   20/20
+  face_9deg_downhill                    19/20                   20/20
+  face_10deg_downhill                   8/20 (12 cadute)        20/20
+                                        Wilson 95%: 22-61%      Wilson 95%: 84-100%   (non si sovrappongono)
+  pyramid_3deg -> pyramid_8deg          20/20                   20/20
+  pyramid_9deg                          19/20                   20/20
+  pyramid_10deg                         14/20 (6 cadute)        20/20
+                                        Wilson 95%: 48-85%      Wilson 95%: 84-100%   (si toccano appena)
+
+  altre grandezze in discesa:
+                                        it999 (finale)          it400
+  avanzamento face_downhill 3° -> 8°     4,39 -> 5,74 m          3,93 -> 5,35 m
+  avanzamento face_10deg_downhill       8,48 m                  8,53 m (circa 0,43 m/s, sopra gli 0,3 comandati)
+  errore di velocità (1 s), face 4°     0,067 m/s               0,084 m/s
+  errore di velocità (1 s), face 9°     0,056 m/s               0,034 m/s
+  potenza pyramid_10deg                 3,21 W                  2,50 W
+  potenza face_9deg_downhill            3,91 W                  3,49 W
+
+  fuori dalla sua situazione:
+                                        it999 (finale)          it400
+  piano: avanzamento, errore velocità   3,64 m, 0,115 m/s       2,97 m, 0,148 m/s   (alpha: 1,95 m, 0,20 m/s)
+  face_5.5deg_uphill, face_6deg_uphill  20/20, 20/20            14/20, 13/20
+
+  distanza da alpha sui propri stati (mse_before_falls):
+                                        it999      it400
+  discese face                          0,0130     0,0097
+  piramidi (discesa)                    0,0113     0,0081
+  piano                                 0,0095     0,0065
+  salite face                           0,0077     0,0055
+  fosse (salita)                        0,0081     0,0060
+
+considerazioni:
+- per slope_down non c'è il compromesso di slope_up: il checkpoint 400 è uguale o migliore sulla metrica principale
+  in tutta la sua situazione, e nettamente migliore proprio sulle discese più ripide (10°), dove il finale cade.
+- il finale segue un po' meglio la velocità sulle pendenze moderate (circa 0,3-0,5 m in più in 20 s, errore di
+  velocità leggermente minore); a 9-10° è il checkpoint 400 a seguire meglio il comando, e consuma meno quasi
+  ovunque.
+- a 10° entrambi accelerano oltre il comando (circa 8,5 m in 20 s): il checkpoint 400 non cade, ma la discesa resta
+  troppo veloce. Per la metrica è un successo; va scritto nella tesi.
+- il checkpoint 400 è circa il 25-30% più vicino ad alpha_walking ovunque.
+
+perché le ultime 600 iterazioni peggiorano proprio la discesa più ripida, su cui la specialista è addestrata:
+PPO non ottimizza "non cadere nella nostra valutazione", ma la ricompensa del training nel simulatore del training,
+e le due cose coincidono solo in parte.
+1) dopo la 400 il reward sale per altri termini, non per la stabilità (si vede nelle curve,
+   events.out.tfevents.1793141017...):
+                                        ~400              ~999
+   track_angular_velocity (heading)     ~0,35-0,49        0,60
+   action_rate_l2 (penalità)            ~-0,25            -0,20
+   mean_action_acc                      ~0,12             0,09
+   track_linear_velocity                ~1,25             ~1,30
+   fell_over                            ~0,2              ~0,2 (non cala)
+   La policy ha imparato a tenere meglio la direzione, a muoversi in modo più fluido e a seguire un po' meglio la
+   velocità, non a cadere meno. Su un pendio di 10° camminare più veloce e con azioni più morbide può voler dire
+   correggere meno quando il robot accelera.
+2) le pendenze più ripide pesano poco nel training (si vede nelle curve): il curriculum è saturo (circa 90% di
+   promozioni dall'iterazione ~200) e mjlab rimanda su un livello a caso i robot che superano l'ultimo; il livello
+   medio scende da 5,3 (iterazioni 250-300) a circa 4,5 (dalla 350 in poi). Le pendenze vicine a 10° sono una piccola
+   parte dei dati di ogni iterazione, più il 15% di piano: il miglioramento sulle altre può avvenire a spese del caso
+   più raro e più difficile.
+3) ipotesi, non verificata: due simulatori diversi (training su mjlab GPU, valutazione su MuJoCo CPU con i motori
+   bam). Più iterazioni possono adattare la policy ai dettagli del simulatore di training, e lo svantaggio si vede
+   dove la policy è al limite.
+4) ipotesi, non verificata: meno esplorazione. La std delle azioni scende da 0,045 (iterazione ~400) a 0,03 (999),
+   con entropy_coef 0: la policy vede stati meno vari ed è più fragile al rumore della valutazione (rumore iniziale
+   sui giunti, tensione della batteria, motori diversi).
+cautela: un solo terreno per situazione (seme 0) e 20 episodi; netta su face_10deg_downhill, al limite su
+pyramid_10deg.
+verifiche possibili per distinguere le cause:
+- checkpoint intermedi (model_500 ... model_900) convertiti e valutati solo a 9-10° (face_9deg_downhill,
+  face_10deg_downhill, pyramid_9deg, pyramid_10deg): un calo graduale indica le cause 1-2 o 4, un salto un evento
+  preciso del training;
+- i due checkpoint nel simulatore di training (play di mjlab sulle righe a 10°): se anche lì il 999 cade di più la
+  causa è nel training, altrimenti nel divario tra i simulatori;
+- più semi (seeds: [0, 1, 2, 3, 4]) su quelle 4 situazioni.
+
+giustificazione della scelta (it400 per la distillazione di slope_down):
+- è più vicino ad alpha_walking del 25-30% nella sua situazione: il vettore, che si somma alle activation di
+  alpha_walking con i pesi fissi, deve produrre una correzione più piccola. La distanza misurata è l'errore da cui
+  parte la distillazione (vettore a zero), come per slope_up.
+- qui non serve nemmeno la regola "a parità di risultati il più vicino": il checkpoint 400 è anche migliore sulla
+  metrica principale, perché riesce sempre a 9-10° dove il finale cade. È il modello migliore da imitare.
+- il vantaggio da recuperare è più grande e più pulito: alpha_walking cade in discesa e il checkpoint 400 non cade
+  mai, quindi il denominatore del vantaggio recuperato (piano, sezione 3.2, passo 5) comprende anche le pendenze
+  di 9-10°.
+- le due specialiste seguono la stessa regola: per entrambe si usa il checkpoint 400.
+- costo della scelta, da dichiarare nella tesi: sul piano e sulle pendenze moderate il checkpoint 400 segue un po'
+  peggio la velocità del finale (resta comunque migliore di alpha_walking), e a 10° scende più veloce del comando.

@@ -30,3 +30,7 @@ slope_up-20261028-0021-it400:
 slope_down-20261027-2240:
   type: onnx
   hf: [mpreda/slope_down-20261027-2240, 20261027-2240_train_ppo_slope_down.onnx]
+
+slope_down-20261027-2240-it400:
+  type: onnx
+  run: 20261028-2022_convert_20261027-2240_train_ppo_slope_down_it400
