@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from steerduck.config import CONFIGS, find_run, load_situations, load_yaml
+from steerduck.config import CONFIGS, DATA, find_run, load_situations, load_yaml
 
 WALKING_METRICS = ("progress_m", "vel_error_m_s", "vel_error_1s_m_s", "path_speed_m_s", "yaw_rate_rad_s", "power_w",
                    "max_tilt_deg", "distance_m", "vel_error_after_event_m_s", "power_after_event_w")
@@ -142,6 +142,43 @@ def compare_to_reference(table: pd.DataFrame, episodes: pd.DataFrame, conf: dict
     table = pd.concat([table, table.apply(flags, axis=1)], axis=1)
     table["worse"] = table[["worse_falls", "worse_vel", "worse_power"]].any(axis=1)
     return table
+
+
+def action_distance(run: str, controller: str, sources=None, only=None) -> pd.DataFrame:
+    """How far `controller` is from the controllers of an evaluation run, on the states those visited
+    (docs/TO_DO_fase2.md, 5.3): mean squared difference between the recorded actions and the actions of
+    `controller` on the same observations. One row per (source controller, situation): over all the steps,
+    without the steps less than fall_horizon_s before a fall, and per joint. It is the error a steering vector
+    starts from in the distillation (plan section 3.2, step 3, with the vector at zero)."""
+    from steerduck.policy import relabel, resolve
+    run_dir = find_run(run)
+    conf, steps_dir = load_yaml(run_dir / "config.yaml"), DATA / run_dir.name
+    if conf["action_noise_std"]:
+        raise ValueError(f"{run_dir.name}: recorded with action noise {conf['action_noise_std']}: noisy actions")
+    if not (steps_dir / "fields.json").is_file():
+        raise FileNotFoundError(f"{steps_dir}: no per-step data (was the run evaluated with --no-record?)")
+    recorded = [c["name"] for c in conf["controllers"]]
+    unknown = set(sources or []) - set(recorded)
+    if unknown:
+        raise ValueError(f"{sorted(unknown)} not in {run_dir.name}; its controllers: {', '.join(recorded)}")
+    joints = json.loads((steps_dir / "fields.json").read_text())["joint_order"]
+    spec, rows = resolve(controller), []
+    for source in sources or recorded:
+        for s in conf["situations"]:
+            files = sorted((steps_dir / source).glob(f"{s['name']}__seed*.npz"))
+            if not files or (only and s["name"] not in only):
+                continue
+            data = [np.load(f) for f in files]
+            obs, action = (np.concatenate([d[k] for d in data]) for k in ("obs", "action"))
+            before_fall = ~np.concatenate([d["falls_within_2s"] for d in data])
+            sq = (action - relabel(spec, obs)) ** 2
+            rows.append({"source": source, "controller": controller, "situation": s["name"], "group": s["group"],
+                         "steps": len(sq), "mse": sq.mean(),
+                         "mse_before_falls": sq[before_fall].mean() if before_fall.any() else np.nan,
+                         **{f"mse_{j}": v for j, v in zip(joints, sq.mean(axis=0))}})
+    if not rows:
+        raise ValueError(f"{run_dir.name}: no per-step data for these controllers and situations")
+    return pd.DataFrame(rows)
 
 
 def phase1(runs: list[str]):

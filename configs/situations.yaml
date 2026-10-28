@@ -33,27 +33,27 @@ situations:
     terrain: flat
 
   # ---- uneven ground ----
-  # - name: grid_{height_cm}cm
-  #   group: uneven
-  #   terrain: grid
-  #   sweep: {height_cm: [0.3, 0.6, 0.9, 1.2, 1.5]}
+  - name: grid_{height_cm}cm
+    group: uneven
+    terrain: grid
+    sweep: {height_cm: [0.3, 0.6, 0.9, 1.2, 1.5]}
 
-  # - name: rubble_{height_cm}cm
-  #   group: uneven
-  #   terrain: rubble
-  #   sweep: {height_cm: [1, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9]}
+  - name: rubble_{height_cm}cm
+    group: uneven
+    terrain: rubble
+    sweep: {height_cm: [1, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9]}
 
-  # - name: waves_{amplitude_cm}cm
-  #   group: uneven
-  #   terrain: waves
-  #   num_waves: 8
-  #   sweep: {amplitude_cm: [0.5, 1.0, 1.5, 2.0]}
+  - name: waves_{amplitude_cm}cm
+    group: uneven
+    terrain: waves
+    num_waves: 8
+    sweep: {amplitude_cm: [0.5, 1.0, 1.5, 2.0]}
 
   # ---- low steps ----
-  # - name: stairs_{direction}_{height_cm}cm
-  #   group: steps
-  #   terrain: stairs
-  #   sweep: {height_cm: [1.0, 1.25, 1.5, 1.75], direction: [down, up]}
+  - name: stairs_{direction}_{height_cm}cm
+    group: steps
+    terrain: stairs
+    sweep: {height_cm: [1.0, 1.25, 1.5, 1.75], direction: [down, up]}
 
   # ---- slopes ----
   - name: pyramid_{deg}deg
@@ -74,47 +74,47 @@ situations:
     sweep: {deg: [3, 4, 5, 5.5, 6, 6.5, 7, 8, 9, 10], direction: [downhill, uphill]}
 
   # ---- slippery floor ----
-  # - name: friction_{friction}
-  #   group: friction
-  #   terrain: flat
-  #   sweep: {friction: [0.175, 0.15, 0.125]}
+  - name: friction_{friction}
+    group: friction
+    terrain: flat
+    sweep: {friction: [0.175, 0.15, 0.125]}
 
-  # # ---- payload ----
-  # - name: payload_{mass_pct}pct_{offset}
-  #   group: payload
-  #   terrain: flat
-  #   offset: com
-  #   sweep: {mass_pct: [40, 50], }
+  # ---- payload ----
+  - name: payload_{mass_pct}pct_{offset}
+    group: payload
+    terrain: flat
+    offset: com
+    sweep: {mass_pct: [40, 50], }
 
-  # - name: payload_{mass_pct}pct_{offset}
-  #   group: payload
-  #   terrain: flat
-  #   sweep: {mass_pct: [40, 50], offset: [front, back, side, up]}
+  - name: payload_{mass_pct}pct_{offset}
+    group: payload
+    terrain: flat
+    sweep: {mass_pct: [40, 50], offset: [front, back, side, up]}
 
-  # ---- transitions during the episode ----
-  # - name: trans_{direction}_{deg}deg
-  #   group: transition
-  #   terrain: strip
-  #   flat_before_m: 1.5
-  #   slope_m: 1.5
-  #   flat_after_m: 4.0
-  #   episode_s: 30.0
-  #   sweep: {deg: [5, 10], direction: [down, up]}
+  #---- transitions during the episode ----
+  - name: trans_{direction}_{deg}deg
+    group: transition
+    terrain: strip
+    flat_before_m: 1.5
+    slope_m: 1.5
+    flat_after_m: 4.0
+    episode_s: 30.0
+    sweep: {deg: [5, 10], direction: [down, up]}
 
-  # - name: trans_friction_{friction_after}
-  #   group: transition
-  #   terrain: flat
-  #   event: friction
-  #   event_t_s: 5.0
-  #   sweep: {friction_after: [0.3, 0.15]}
+  - name: trans_friction_{friction_after}
+    group: transition
+    terrain: flat
+    event: friction
+    event_t_s: 5.0
+    sweep: {friction_after: [0.3, 0.15]}
 
-  # - name: trans_payload_{mass_pct}pct_{offset}
-  #   group: transition
-  #   terrain: flat
-  #   mass_pct: 30
-  #   event: payload
-  #   event_t_s: 5.0
-  #   sweep: {offset: [com, back]}
+  - name: trans_payload_{mass_pct}pct_{offset}
+    group: transition
+    terrain: flat
+    mass_pct: 30
+    event: payload
+    event_t_s: 5.0
+    sweep: {offset: [com, back]}
 
 # Groups of situations evaluated together; `all` (every situation) is built in.
 # A suite is a list of names, or {groups: [...]}.

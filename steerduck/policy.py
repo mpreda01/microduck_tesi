@@ -201,6 +201,15 @@ def resolve_checkpoint(name: str) -> str:
     return str(path)
 
 
+def relabel(spec: dict, obs: np.ndarray) -> np.ndarray:
+    """Actions a controller takes on recorded observations, without simulating: DAgger's labelling step (plan
+    section 3.2, step 4) and the distance between two policies. Only for controllers without memory: the
+    last action they see is the one written in the observations."""
+    controller = build_controller(spec)
+    controller.reset()
+    return np.stack([controller.act(o) for o in obs])
+
+
 def build_controller(spec: dict, record_activations: bool = False) -> Controller:
     if spec["type"] == "onnx":
         return OnnxController(spec["name"], spec["path"], record_activations)

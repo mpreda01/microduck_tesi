@@ -94,10 +94,17 @@ are in [configs/training.yaml](configs/training.yaml).
 | Train a specialist (GPU) | `python scripts/train.py ppo --situation slope_down` |
 | Train every family (GPU) | `python scripts/train.py ppo --situation all` (one run per family, one after the other) |
 | Evaluate it | add `specialist_slope_down: {type: onnx, run: <run folder>}` to [configs/policies.yaml](configs/policies.yaml), then `python scripts/evaluate.py alpha_walking specialist_slope_down --suite fixed` |
+| Distance from alpha_walking | `python scripts/action_distance.py --run <evaluation run> --controller alpha_walking [--source <specialist>] [--only <situations>]` |
 
 `train.py` writes `runs/<YYYYMMDD-HHMM>_train_ppo_<family>/` with the checkpoints
 `model_<it>.pt`, `<run folder>.onnx` (the latest checkpoint), the tensorboard logs (`tensorboard --logdir runs`)
 and `run.json` with the GPU hours.
+
+`action_distance.py` measures how far a specialist is from `alpha_walking` on the states the specialist visited,
+without simulating: `alpha_walking` acts on the observations recorded by an evaluation run (so the run needs its
+per-step data, i.e. no `--no-record`), and the table `results/tables/<run>__<controller>.csv` gives the mean squared
+difference between the two actions per situation, without the steps just before a fall, and per joint. About
+1 minute for 40 situations x 20 episodes x 2 specialists.
 
 **Weights & Biases.** Training runs are logged to W&B as set in the `wandb` block of
 [configs/training.yaml](configs/training.yaml): project, entity, group, tags (the family is added),
