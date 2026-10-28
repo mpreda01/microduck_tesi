@@ -16,10 +16,16 @@ rough_walk_g:
   type: onnx
   hf: [RemiFabre/microduck-rough-walk-g, policy.onnx]
 
-# trained before the directional families (random commands on the pyramid): downhill, uphill and across mixed
+# specialists of phase 2: alpha_walking fine-tuned with PPO on one family of configs/training.yaml (directional:
+# only uphill or only downhill on face_slope), uploaded to Hugging Face by scripts/train.py
 slope_up-20261028-0021:
   type: onnx
   hf: [mpreda/slope_up-20261028-0021, 20261028-0021_train_ppo_slope_up.onnx]
+
+# the same training at iteration 400 (scripts/convert.py checkpoint), to compare with the last checkpoint (999)
+slope_up-20261028-0021-it400:
+  type: onnx
+  run: 20261028-1912_convert_20261028-0021_train_ppo_slope_up_it400
 
 slope_down-20261027-2240:
   type: onnx

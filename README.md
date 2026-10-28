@@ -94,6 +94,7 @@ are in [configs/training.yaml](configs/training.yaml).
 | Train a specialist (GPU) | `python scripts/train.py ppo --situation slope_down` |
 | Train every family (GPU) | `python scripts/train.py ppo --situation all` (one run per family, one after the other) |
 | Evaluate it | add `specialist_slope_down: {type: onnx, run: <run folder>}` to [configs/policies.yaml](configs/policies.yaml), then `python scripts/evaluate.py alpha_walking specialist_slope_down --suite fixed` |
+| Evaluate an intermediate checkpoint | `python scripts/convert.py checkpoint --run <training run> --iteration 400`, then add the printed `run:` entry to [configs/policies.yaml](configs/policies.yaml) and evaluate it |
 | Distance from alpha_walking | `python scripts/action_distance.py --run <evaluation run> --controller alpha_walking [--source <specialist>] [--only <situations>]` |
 
 `train.py` writes `runs/<YYYYMMDD-HHMM>_train_ppo_<family>/` with the checkpoints

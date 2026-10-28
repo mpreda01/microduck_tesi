@@ -9,6 +9,7 @@ import numpy as np
 from steerduck.config import CONFIGS, MODELS, RUNS, load_yaml
 
 N_OBS = 61
+NORMALIZER_EPS = 1e-2   # rsl_rl's EmpiricalNormalization: (obs - mean) / (std + eps)
 
 
 class Controller:
@@ -159,6 +160,37 @@ def actor_onnx_difference(actor, path, n: int = 10_000) -> float:
     obs = TensorDict({group: torch.from_numpy(x) for group in actor.obs_groups}, batch_size=[n]).to(device)
     with torch.no_grad():
         return float(np.abs(actor(obs).cpu().numpy() - expected).max())
+
+
+def checkpoint_to_onnx(checkpoint, template, out):
+    """The actor of an rsl_rl checkpoint as ONNX, written into the graph of an ONNX exported by the same
+    training (`template`): same nodes, the checkpoint's weights and normalization. Lighter than microduck_rl's
+    export, which rebuilds the mjlab environment just to read the network."""
+    import onnx
+    import torch
+    from onnx import numpy_helper
+    actor = torch.load(str(checkpoint), map_location="cpu", weights_only=False)["actor_state_dict"]
+    model = onnx.load(str(template))
+    divisors = [n.input[1] for n in model.graph.node if n.op_type == "Div"]
+    if len(divisors) != 1:
+        raise ValueError(f"{template}: expected one Div node (the input normalization), found {len(divisors)}")
+    values = {k: v.numpy() for k, v in actor.items()}
+    values[divisors[0]] = values["obs_normalizer._std"] + NORMALIZER_EPS
+    for init in model.graph.initializer:
+        if init.name not in values:
+            raise ValueError(f"{template}: {init.name} not in the actor of {checkpoint}")
+        init.CopyFrom(numpy_helper.from_array(values[init.name].astype(np.float32), init.name))
+    model.metadata_props.add(key="steerduck_checkpoint", value=str(checkpoint))
+    onnx.save(model, str(out))
+
+
+def onnx_difference(a, b, n: int = 1000) -> float:
+    """Largest difference between the actions of two ONNX policies on the same random observations."""
+    import onnxruntime as ort
+    x = np.random.default_rng(0).normal(size=(n, N_OBS)).astype(np.float32)
+    sessions = [ort.InferenceSession(str(p), providers=["CPUExecutionProvider"]) for p in (a, b)]
+    actions = [np.concatenate([s.run(None, {s.get_inputs()[0].name: row[None]})[0] for row in x]) for s in sessions]
+    return float(np.abs(actions[0] - actions[1]).max())
 
 
 # ---------------------------------------------------------------------------
