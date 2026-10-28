@@ -39,7 +39,9 @@ fall_horizon_s: 2.0               # label falls_within_2s: steps less than this 
 video: true
 video_every_n_steps: 2
 video_size: [640, 480]
-# a list of names | [] or null = every situation | one_per_family = the first situation of each block of situations.yaml
+video_znear_m: 0.01               # near clipping plane of videos and preview (MuJoCo's scales with the scene size)
+# a list of names | [] or null = every situation | one_per_family = the first situation of each block of
+# situations.yaml and of each of its directions (face_3deg_downhill and face_3deg_uphill)
 video_situations: one_per_family
 
 workers: 0                        # parallel processes (0 = one per CPU core)

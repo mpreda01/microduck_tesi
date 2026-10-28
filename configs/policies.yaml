@@ -17,6 +17,10 @@ rough_walk_g:
   hf: [RemiFabre/microduck-rough-walk-g, policy.onnx]
 
 # trained before the directional families (random commands on the pyramid): downhill, uphill and across mixed
-slope_down-20261022-1815:
+slope_up-20261028-0021:
   type: onnx
-  hf: [mpreda/slope_down-20261022-1815, 20261022-1815_train_ppo_slope_down.onnx]
+  hf: [mpreda/slope_up-20261028-0021, 20261028-0021_train_ppo_slope_up.onnx]
+
+slope_down-20261027-2240:
+  type: onnx
+  hf: [mpreda/slope_down-20261027-2240, 20261027-2240_train_ppo_slope_down.onnx]

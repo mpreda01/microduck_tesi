@@ -124,10 +124,11 @@ def make_subterrain(s: dict, conf: dict):
         a = s["amplitude_cm"] / 100
         return hf.HfWaveTerrainCfg(proportion=1.0, amplitude_range=(a, a), num_waves=s["num_waves"],
                                    horizontal_scale=0.05, vertical_scale=0.001), patch
-    if kind == "slope":
+    if kind == "slope":   # up: the pyramid inverted (a pit), so the robot starts at the bottom and walks uphill
         g = math.tan(math.radians(s["deg"]))
         return hf.HfPyramidSlopedTerrainCfg(proportion=1.0, slope_range=(g, g), platform_width=0.8,
-                                            horizontal_scale=0.1, vertical_scale=0.001), patch
+                                            inverted=s["direction"] == "up", horizontal_scale=0.1,
+                                            vertical_scale=0.001), patch
     if kind == "face_slope":
         size = conf["face_slope_size_m"]
         return FlatFacePyramidTerrainCfg(proportion=1.0, slope_deg=s["deg"], platform_width=1.0), (size, size)

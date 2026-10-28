@@ -55,10 +55,11 @@ def main():
                  "video": False if args.no_video else None}
     conf |= {k: v for k, v in overrides.items() if v is not None}
     situations = config.select_situations(conf["suite"], args.only.split(",") if args.only else None)
-    if conf["video_situations"] == "one_per_family":   # the first situation of each block of situations.yaml
+    if conf["video_situations"] == "one_per_family":
+        # the first situation of each block of situations.yaml and direction: downhill and uphill walk differently
         first_of_family = {}
         for s in situations:
-            first_of_family.setdefault(s["family"], s["name"])
+            first_of_family.setdefault((s["family"], s.get("direction")), s["name"])
         conf["video_situations"] = list(first_of_family.values())
 
     name = args.name or "+".join(args.controllers or ["preview"]) + f"_{conf['suite']}" + ("_only" if args.only else "")

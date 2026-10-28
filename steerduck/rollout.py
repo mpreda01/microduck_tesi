@@ -190,12 +190,20 @@ def run_episode(robot: Robot, controller, conf: dict, s: dict, origin, size, rng
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
+def make_renderer(model, height: int, width: int, conf: dict):
+    """Renderer with the near clipping plane at video_znear_m. MuJoCo puts it at znear x the model extent: on the
+    40 m face_slope pyramid that is 0.92 m, beyond the 0.9 m of the video camera, so the robot and the ground in
+    front of it were cut away. Only the rendering changes, not the physics."""
+    model.vis.map.znear = conf["video_znear_m"] / model.stat.extent
+    return mujoco.Renderer(model, height, width)
+
+
 class Video:
     """Frames of one episode from a camera tracking the trunk (needs MUJOCO_GL=egl on a headless machine)."""
 
     def __init__(self, model, conf: dict):
         width, height = conf["video_size"]
-        self.renderer = mujoco.Renderer(model, height, width)
+        self.renderer = make_renderer(model, height, width, conf)
         self.cam = mujoco.MjvCamera()
         self.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
         self.cam.trackbodyid = model.body("trunk_base").id
@@ -219,7 +227,7 @@ def start_still(conf: dict, s: dict, seed: int, com_trunk, robot_mass):
     robot = Robot(model, conf)
     x, y, yaw = start_pose(s, origin, size, np.random.default_rng([situation_seed(s["name"], seed), 0]), conf)
     z = robot.place(s, x, y, yaw, conf["actuator"]["vin"], np.zeros(len(DEFAULT_POSE)), conf["spawn_height_m"])
-    renderer = mujoco.Renderer(model, 180, 240)
+    renderer = make_renderer(model, 180, 240, conf)
     cam = mujoco.MjvCamera()
     cam.lookat[:] = [x, y, z - 0.1]
     cam.distance, cam.elevation, cam.azimuth = 2.0, -25.0, math.degrees(yaw) + 150.0
