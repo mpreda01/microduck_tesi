@@ -241,3 +241,90 @@ giustificazione della scelta (it400 per la distillazione di slope_down):
 - le due specialiste seguono la stessa regola: per entrambe si usa il checkpoint 400.
 - costo della scelta, da dichiarare nella tesi: sul piano e sulle pendenze moderate il checkpoint 400 segue un po'
   peggio la velocità del finale (resta comunque migliore di alpha_walking), e a 10° scende più veloce del comando.
+
+COME SCEGLIAMO IL CHECKPOINT DELLA SPECIALISTA DOPO IL TRAINING (regola per tutte le famiglie)
+codice: scripts/choose_checkpoint.py, report.checkpoint_choice, report.training_curves e report.choose_checkpoint,
+regola nel blocco
+ppo.checkpoint_choice di configs/training.yaml; scritto il 29/10/2026 sopra il commit 9ee194f
+(non ancora committato: indicare qui il commit quando c'è)
+
+obiettivo: la specialista è il modello che il vettore deve imitare. Serve un compromesso tra
+- precisione: la specialista deve cadere il meno possibile nella sua situazione (requisito principale: una caduta
+  può rompere il robot reale);
+- facilità di distillazione: più è vicina ad alpha_walking, più piccola è la correzione che il vettore deve
+  produrre (la distanza è l'errore da cui parte la distillazione).
+I due esempi precedenti mostrano che l'ultimo checkpoint non è automaticamente il migliore: per slope_up è uguale
+in successi ma più lontano da alpha, per slope_down cade di più a 10° ed è più lontano.
+
+comando unico (fa i quattro passi qui sotto e applica la regola del passo 4):
+   python scripts/choose_checkpoint.py --run <training> --only <situazioni della famiglia, anche con pattern>
+   -> runs/<AAAAMMGG-HHMM>_choose_<training>/ con choice.csv (la scelta e il perché), checkpoints.csv (le curve),
+   l'ONNX scelto (voce run: per policies.yaml) e i due run di valutazione. Prova breve (2 episodi, face_10deg_downhill
+   e pyramid_10deg) sul training di slope_down: candidati 400, 700, 999; la 999 cade 3 volte su 4, scelta la 400.
+   La regola del passo 4 nel codice (report.choose_checkpoint): cadute e successi sommati su tutte le situazioni della
+   famiglia, con intervallo di Wilson al 95%; riferimento = il candidato con meno cadute (a pari cadute, più successi);
+   equivalenti = i candidati i cui intervalli di cadute e di successi si sovrappongono a quelli del riferimento (conta
+   anche il successo, altrimenti un checkpoint che non cade ma resta fermo, come alpha_walking in salita, vincerebbe
+   perché è il più vicino ad alpha); scelto = l'equivalente con mse_before_falls medio più basso sui propri stati.
+
+procedura in quattro passi (quella che il comando unico esegue; si può fare anche a mano):
+1) proposta. Il comando unico valuta prima l'ultimo checkpoint e usa i suoi stati; solo la proposta, senza
+   simulare (circa 30 s), con gli stati di una valutazione già fatta:
+   python scripts/choose_checkpoint.py --run <training> --shortlist --states <run di valutazione>
+       --source <specialista finale> --only <situazioni della famiglia, anche con pattern>
+   per ogni checkpoint model_<it>.pt lo script dà:
+   - le curve del training mediate su una finestra centrata di 101 iterazioni intorno al checkpoint: reward,
+     durata degli episodi, livello medio e massimo della scala, std delle azioni, e la quota di episodi finiti in
+     caduta (fall_pct = fell_over / somma di tutte le terminazioni, in %);
+   - la distanza dalla policy di partenza (alpha_walking): errore quadratico medio tra le azioni del checkpoint e
+     quelle di alpha_walking sugli stessi stati registrati, senza i passi a meno di 2 s da una caduta (un passo
+     ogni 10). Gli stati sono quelli di un run di valutazione, di solito la specialista finale sulle situazioni
+     della sua famiglia: lo stesso insieme di stati per tutti i checkpoint, quindi le distanze sono confrontabili.
+   regola (ppo.checkpoint_choice):
+   - un checkpoint è sul plateau se il training ha già raggiunto l'ultima riga della scala (livello massimo =
+     ladder_rows - 1 in tutta la finestra: la policy ha visto le pendenze più difficili) e la sua quota di cadute
+     supera quella del checkpoint migliore di al più 2 punti percentuali;
+   - candidati: il checkpoint del plateau più vicino ad alpha_walking, quello a metà del plateau, l'ultimo.
+2) conversione e valutazione dei candidati sulle situazioni della famiglia (convert.py checkpoint, policies.yaml,
+   evaluate.py --only), con gli stessi episodi della specialista finale.
+3) distanza di ogni candidato da alpha_walking sui propri stati (action_distance.py).
+4) scelta, con la regola fissata prima di guardare i risultati (TO_DO_fase2.md, punto 4.3):
+   - prima le cadute: il candidato con meno cadute nelle situazioni della famiglia; due candidati sono equivalenti
+     se i loro intervalli di Wilson al 95% (di cadute e di successi) si sovrappongono;
+   - tra i candidati equivalenti, il più vicino ad alpha_walking (mse_before_falls sui propri stati);
+   - velocità e potenza solo come informazione, da riportare come costo della scelta.
+
+perché lo script propone e non sceglie:
+- le curve del training non misurano quello che ci interessa. La quota di cadute è una media su tutte le righe
+  della scala più il 15% di piano, e con il curriculum saturo le righe più difficili sono una piccola parte dei
+  dati. Il training gira inoltre su mjlab e non sullo stack della valutazione (MuJoCo CPU con i motori bam).
+- prova sui due training (results/tables/checkpoints__20261027-2240_train_ppo_slope_down.csv e
+  checkpoints__20261028-0021_train_ppo_slope_up.csv, stati del run 20261028-1648; scritte da scripts/checkpoints.py,
+  poi unito a choose_checkpoint.py: oggi la stessa tabella è il checkpoints.csv di choose_checkpoint.py --shortlist
+  --states, con valori identici per slope_down):
+                    slope_down                                slope_up
+  iterazione  fall_pct  reward  distanza da alpha     fall_pct  reward  distanza da alpha
+  0           6,4       64,8    0,00005               9,0       62,8    0,00004
+  200         6,3       127,9   0,0060                6,4       126,1   0,0067
+  300         7,7       128,9   0,0086                7,5       127,0   0,0086
+  400         6,9       132,0   0,0095                7,5       127,9   0,0105
+  700         5,3       135,7   0,0110                8,0       127,3   0,0120
+  900         5,2       137,1   0,0117                7,8       128,7   0,0141
+  999         6,0       136,5   0,0120                8,1       127,8   0,0148
+  (scala completa da circa la 300 in entrambi; fino alla 200 il livello massimo è ancora sotto il 7)
+  per slope_down le cadute del training scendono dopo la 400 (6,9% -> 5,2% alla 900), mentre nella valutazione
+  l'ultimo checkpoint cade di più proprio a 10° (8/20 successi contro 20/20 della 400). Una regola "meno cadute
+  nel training" avrebbe scelto il checkpoint sbagliato. Per questo la tolleranza è larga (2 punti, circa due volte
+  la differenza tra checkpoint vicini) e la decisione arriva dalla valutazione.
+- la distanza da alpha invece è misurata davvero e cresce in modo regolare con le iterazioni: per entrambe le
+  famiglie il checkpoint del plateau più vicino ad alpha è il primo del plateau.
+- controllo del metodo: model_0.pt dà distanza circa 0 (5e-5; il checkpoint 0 è salvato dopo il primo
+  aggiornamento).
+
+candidati proposti:
+- slope_down: 400, 700, 999. La 400 e la 999 sono già valutate (sezione precedente): si sceglie la 400, coerente
+  con lo script.
+- slope_up: 300, 700, 999. La 300 non è ancora valutata. La scelta attuale (400, sezione di slope_up) resta valida
+  finché la 300 non è valutata: la 400 è al 100% in salita. Se anche la 300 fosse al 100%, per la regola andrebbe
+  scelta la 300, più vicina ad alpha (0,0086 contro 0,0105 sugli stati della finale). Attenzione: alla 300 la scala
+  è completa da poche decine di iterazioni.

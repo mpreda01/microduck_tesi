@@ -19,7 +19,7 @@ ppo:
     upload_model: true             # upload the checkpoints (.pt) and their ONNX to W&B
   huggingface:                     # upload of the trained specialist to the model repo <namespace>/<family>-<YYYYMMDD-HHMM>,
     upload: true                   # the timestamp of the run folder, which is also the name of the W&B run
-    namespace: null                # Hugging Face user or organization; null = the logged-in user
+    namespace: mpreda                # Hugging Face user or organization; null = the logged-in user
     private: false
   save_interval: 100               # checkpoint (model_<it>.pt) every N iterations; the latest also as ONNX
   reward: {feet: false, track: false, progress: true}   # options of microduck_rl's hostile task:
@@ -41,6 +41,14 @@ ppo:
   # 0.4 m/s, so an episode stays on its face. start_margin_m: the start is this far from the top platform
   # (downhill) or from the patch edge (uphill), on the centre line of the +x face.
   terrain: {patch_size_m: 20.0, border_width_m: 4.0, ladder_rows: 8, flat_proportion: 0.15, start_margin_m: 0.5}
+  # Which checkpoints to evaluate after a training (scripts/choose_checkpoint.py, Notes.txt). On the plateau: the whole
+  # ladder reached and a fall share at most max_fall_pct_above_best points above the best checkpoint. Loose on
+  # purpose: the training falls average all the ladder rows, and for slope_down they kept falling after it400
+  # while the evaluation at 10 deg got worse. The checkpoint closest to init_controller on the plateau goes first.
+  checkpoint_choice:
+    window_iterations: 101         # curves averaged over this centred window around each checkpoint
+    max_fall_pct_above_best: 2.0   # % of the episodes ended in a fall
+    state_stride: 10               # distance from init_controller on every Nth recorded step
 
   # One specialist per family. Each terrain uses the keys of configs/situations.yaml; a value written as
   # [easy, hard] grows linearly along the ladder rows (difficulty 0 -> 1). On face_slope, `direction` sets

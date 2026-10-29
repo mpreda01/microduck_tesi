@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from steerduck.config import CONFIGS, DATA, find_run, load_situations, load_yaml
+from steerduck.config import CONFIGS, DATA, find_run, load_situations, load_yaml, matches
 
 WALKING_METRICS = ("progress_m", "vel_error_m_s", "vel_error_1s_m_s", "path_speed_m_s", "yaw_rate_rad_s", "power_w",
                    "max_tilt_deg", "distance_m", "vel_error_after_event_m_s", "power_after_event_w")
@@ -144,6 +144,19 @@ def compare_to_reference(table: pd.DataFrame, episodes: pd.DataFrame, conf: dict
     return table
 
 
+def recorded_steps(run_dir, source: str, only=None):
+    """Yield (situation, obs, action, before_fall) for each situation of an evaluation run with per-step data of
+    `source`. only: situation names or patterns (face_*_downhill); before_fall excludes the steps less than
+    fall_horizon_s before a fall."""
+    conf, steps_dir = load_yaml(run_dir / "config.yaml"), DATA / run_dir.name
+    for s in conf["situations"]:
+        files = sorted((steps_dir / source).glob(f"{s['name']}__seed*.npz"))
+        if files and matches(s["name"], only):
+            data = [np.load(f) for f in files]
+            obs, action, falls = (np.concatenate([d[k] for d in data]) for k in ("obs", "action", "falls_within_2s"))
+            yield s, obs, action, ~falls
+
+
 def action_distance(run: str, controller: str, sources=None, only=None) -> pd.DataFrame:
     """How far `controller` is from the controllers of an evaluation run, on the states those visited
     (docs/TO_DO_fase2.md, 5.3): mean squared difference between the recorded actions and the actions of
@@ -164,13 +177,7 @@ def action_distance(run: str, controller: str, sources=None, only=None) -> pd.Da
     joints = json.loads((steps_dir / "fields.json").read_text())["joint_order"]
     spec, rows = resolve(controller), []
     for source in sources or recorded:
-        for s in conf["situations"]:
-            files = sorted((steps_dir / source).glob(f"{s['name']}__seed*.npz"))
-            if not files or (only and s["name"] not in only):
-                continue
-            data = [np.load(f) for f in files]
-            obs, action = (np.concatenate([d[k] for d in data]) for k in ("obs", "action"))
-            before_fall = ~np.concatenate([d["falls_within_2s"] for d in data])
+        for s, obs, action, before_fall in recorded_steps(run_dir, source, only):
             sq = (action - relabel(spec, obs)) ** 2
             rows.append({"source": source, "controller": controller, "situation": s["name"], "group": s["group"],
                          "steps": len(sq), "mse": sq.mean(),
@@ -179,6 +186,86 @@ def action_distance(run: str, controller: str, sources=None, only=None) -> pd.Da
     if not rows:
         raise ValueError(f"{run_dir.name}: no per-step data for these controllers and situations")
     return pd.DataFrame(rows)
+
+
+TRAINING_CURVES = {"reward": "Train/mean_reward", "episode_length_steps": "Train/mean_episode_length",
+                   "level_mean": "Curriculum/terrain_levels/mean", "level_max": "Curriculum/terrain_levels/max",
+                   "action_std": "Policy/mean_std"}
+
+
+def training_curves(run_dir, window: int) -> pd.DataFrame:
+    """The tensorboard curves of a training run, one row per iteration, averaged over a centred window of
+    `window` iterations (one iteration is noisy: the fall share varies by about +-3 points). fall_pct: % of the
+    episodes ended in an iteration that ended in a fall."""
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    files = list(run_dir.glob("events.out.tfevents.*"))
+    if len(files) != 1:
+        raise FileNotFoundError(f"{run_dir}: expected one tensorboard file, found {len(files)}")
+    events = EventAccumulator(str(files[0]), size_guidance={"scalars": 0})
+    events.Reload()
+    curve = lambda tag: pd.Series({s.step: s.value for s in events.Scalars(tag)})   # noqa: E731
+    ended = sum(curve(t) for t in events.Tags()["scalars"] if t.startswith("Episode_Termination/"))
+    curves = pd.DataFrame({name: curve(tag) for name, tag in TRAINING_CURVES.items()})
+    curves["fall_pct"] = 100 * curve("Episode_Termination/fell_over") / ended
+    return curves.rolling(window, center=True, min_periods=1).mean()
+
+
+def checkpoint_choice(train_run: str, states_run: str, source: str, only=None):
+    """Which checkpoints of a training run to evaluate (Notes.txt, scelta del checkpoint), with the rule of
+    ppo.checkpoint_choice in configs/training.yaml. Per checkpoint: the training curves around it and its
+    distance from the starting policy (mean squared action difference, steps before a fall) on the states that
+    `source` visited in an evaluation run. On the plateau: the whole terrain ladder reached and a fall share
+    close to the best checkpoint's. -> (table, [closest to the start on the plateau, middle of the plateau,
+    last]): the training curves only shortlist, the evaluation decides."""
+    import tempfile
+    from steerduck.policy import checkpoint_to_onnx, relabel, resolve, training_checkpoints
+    rule = load_yaml(CONFIGS / "training.yaml")["ppo"]["checkpoint_choice"]
+    train, states = find_run(train_run), find_run(states_run)
+    ppo = load_yaml(train / "config.yaml")["ppo"]
+    steps = list(recorded_steps(states, source, only))
+    if not steps:
+        raise ValueError(f"{states.name}: no per-step data of {source} for these situations")
+    obs, before_fall = (np.concatenate([step[k] for step in steps])[::rule["state_stride"]] for k in (1, 3))
+    start = relabel(resolve(ppo["init_controller"]), obs)
+    curves = training_curves(train, rule["window_iterations"])
+    rows = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for it, path in training_checkpoints(train).items():
+            onnx = f"{tmp}/model_{it}.onnx"
+            checkpoint_to_onnx(path, train / f"{train.name}.onnx", onnx)
+            sq = (relabel({"name": path.stem, "type": "onnx", "path": onnx}, obs) - start) ** 2
+            rows.append({"iteration": it, **curves.loc[it], "mse_before_falls": sq[before_fall].mean()})
+    table = pd.DataFrame(rows)
+    table["ladder_reached"] = table.level_max >= ppo["terrain"]["ladder_rows"] - 1
+    best = table.fall_pct[table.ladder_reached].min()
+    table["on_plateau"] = table.ladder_reached & (table.fall_pct <= best + rule["max_fall_pct_above_best"])
+    plateau = table[table.on_plateau]
+    if plateau.empty:
+        raise ValueError(f"{train.name}: no checkpoint reached the top of the terrain ladder")
+    candidates = [plateau.iteration[plateau.mse_before_falls.idxmin()], plateau.iteration.iloc[len(plateau) // 2],
+                  table.iteration.iloc[-1]]
+    return table, list(dict.fromkeys(int(c) for c in candidates))
+
+
+def choose_checkpoint(episodes: pd.DataFrame, distance: pd.DataFrame) -> pd.DataFrame:
+    """The choice among evaluated candidates (Notes.txt, scelta del checkpoint), over all the situations of the
+    runs: one row per controller with falls and successes and their 95% Wilson intervals, and the mean over the
+    situations of mse_before_falls (`distance`, from action_distance on its own states). The reference is the
+    candidate with fewest falls (then most successes); `equivalent` when both intervals overlap the reference's;
+    `chosen`: the equivalent candidate closest to the starting policy."""
+    episodes, rows = add_results(episodes), []
+    for controller, eps in episodes.groupby("controller", sort=False):
+        n, falls, successes = len(eps), int((eps.outcome == "fell").sum()), int((eps.result == "success").sum())
+        rows.append({"controller": controller, "episodes": n, "falls": falls, "successes": successes,
+                     **dict(zip(["falls_ci95_lo_pct", "falls_ci95_hi_pct"], wilson_ci(falls, n))),
+                     **dict(zip(["success_ci95_lo_pct", "success_ci95_hi_pct"], wilson_ci(successes, n))),
+                     "mse_before_falls": distance[distance.source == controller].mse_before_falls.mean()})
+    table = pd.DataFrame(rows)
+    ref = table.sort_values(["falls", "successes"], ascending=[True, False]).iloc[0]
+    table["equivalent"] = ((table.falls_ci95_lo_pct <= ref.falls_ci95_hi_pct)
+                           & (table.success_ci95_hi_pct >= ref.success_ci95_lo_pct))
+    table["chosen"] = table.index == table[table.equivalent].mse_before_falls.idxmin()
+    return table
 
 
 def phase1(runs: list[str]):

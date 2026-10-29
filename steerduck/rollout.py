@@ -10,8 +10,9 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
+import pandas as pd
 
-from steerduck.config import save_json, setup_logging, situation_seed
+from steerduck.config import DATA, new_run, save_json, save_yaml, setup_logging, situation_seed, write_manifest
 from steerduck.policy import build_controller
 from steerduck.scene import (DEFAULT_POSE, JOINT_ORDER, TERRAINS, Robot, Scenario, build_model, robot_com_in_trunk,
                              start_pose)
@@ -286,3 +287,36 @@ def run_all(tasks: list[dict], workers: int, log_file=None) -> list[dict]:
         return [e for t in tasks for e in run_situation(t)]
     with mp.Pool(workers, initializer=setup_logging, initargs=(log_file,)) as pool:
         return [e for episodes in pool.imap_unordered(run_situation, tasks) for e in episodes]
+
+
+def evaluate_run(conf: dict, specs: list[dict], situations: list[dict], name: str) -> Path:
+    """Every (controller, seed, situation) of an evaluation, as a new run runs/<YYYYMMDD-HHMM>_evaluate_<name>/:
+    config.yaml (with controllers and situations), run.json, log.txt, episodes.parquet, videos/, and the per-step
+    data in data/<run_id>/ when conf["record_steps"]. -> the run folder."""
+    run_dir = new_run("evaluate", name)
+    setup_logging(run_dir / "log.txt")
+    com_trunk, robot_mass = robot_com_in_trunk(conf)
+    log.info(f"run {run_dir}\nrobot mass {robot_mass:.3f} kg, centre of mass in the trunk frame "
+             f"{np.round(com_trunk * 1000, 1)} mm")
+    steps_dir = DATA / run_dir.name if conf["record_steps"] else None
+    save_yaml({**conf, "controllers": specs, "situations": situations}, run_dir / "config.yaml")
+    info = {"robot_mass_kg": robot_mass, "steps_dir": str(steps_dir) if steps_dir else None}
+    write_manifest(run_dir, status="running", **info)
+    if steps_dir:
+        write_fields_json(steps_dir / "fields.json", conf)
+
+    tasks = [{"conf": conf, "spec": spec, "situation": s, "seed": seed, "run_dir": str(run_dir),
+              "steps_dir": str(steps_dir) if steps_dir else None}
+             for spec in specs for seed in conf["seeds"] for s in situations]
+    workers = conf["workers"] or mp.cpu_count()
+    log.info(f"{len(tasks)} tasks (controller x seed x situation), {conf['episodes_per_situation']} episodes each, "
+             f"{workers} workers")
+    t0 = time.time()
+    episodes = pd.DataFrame(run_all(tasks, workers, run_dir / "log.txt"))
+    episodes["order"] = episodes.situation.map({s["name"]: i for i, s in enumerate(situations)})
+    episodes = episodes.sort_values(["controller", "seed", "order", "episode"], ignore_index=True).drop(columns="order")
+    episodes.insert(0, "run_id", run_dir.name)
+    episodes.to_parquet(run_dir / "episodes.parquet", index=False)
+    write_manifest(run_dir, status="done", runtime_s=time.time() - t0, episodes=len(episodes), **info)
+    log.info(f"done in {(time.time() - t0) / 60:.1f} min -> {run_dir}")
+    return run_dir

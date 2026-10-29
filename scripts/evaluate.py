@@ -13,15 +13,12 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
-import time
 
 import numpy as np
-import pandas as pd
 
 from steerduck import config
 from steerduck.policy import resolve
-from steerduck.rollout import run_all, start_still, write_fields_json
+from steerduck.rollout import evaluate_run, start_still
 from steerduck.scene import robot_com_in_trunk
 
 log = logging.getLogger("steerduck")
@@ -31,7 +28,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("controllers", nargs="*", help="names in configs/policies.yaml")
     p.add_argument("--suite", help="suite of configs/situations.yaml (default: eval.yaml's)")
-    p.add_argument("--only", help="comma-separated situation names: only these of the suite")
+    p.add_argument("--only", help="comma-separated situation names or patterns (face_*_downhill): only these")
     p.add_argument("--episodes", type=int, help="episodes per situation")
     p.add_argument("--workers", type=int, help="parallel processes (0 = one per CPU core)")
     p.add_argument("--action-noise", type=float, help="std of the Gaussian noise added to every action")
@@ -65,14 +62,12 @@ def main():
     name = args.name or "+".join(args.controllers or ["preview"]) + f"_{conf['suite']}" + ("_only" if args.only else "")
     if conf["action_noise_std"]:
         name += f"_noise{conf['action_noise_std']}"
-    run_dir = config.new_run("evaluate", name)
-    config.setup_logging(run_dir / "log.txt")
-    com_trunk, robot_mass = robot_com_in_trunk(conf)
-    log.info(f"run {run_dir}\nrobot mass {robot_mass:.3f} kg, centre of mass in the trunk frame "
-             f"{np.round(com_trunk * 1000, 1)} mm")
 
     if args.preview:
         import imageio
+        run_dir = config.new_run("evaluate", name)
+        config.setup_logging(run_dir / "log.txt")
+        com_trunk, robot_mass = robot_com_in_trunk(conf)
         images = [start_still(conf, s, conf["seeds"][0], com_trunk, robot_mass) for s in situations]
         images += [np.zeros_like(images[0])] * (-len(images) % 6)   # 6 per row
         grid = np.concatenate([np.concatenate(images[i:i + 6], axis=1) for i in range(0, len(images), 6)])
@@ -80,29 +75,8 @@ def main():
         log.info(f"{run_dir / 'situations_preview.png'}: {len(situations)} situations in order, 6 per row")
         return
 
-    specs = [resolve(c) for c in args.controllers]
-    steps_dir = config.DATA / run_dir.name if conf["record_steps"] else None
-    config.save_yaml({**conf, "controllers": specs, "situations": situations}, run_dir / "config.yaml")
-    info = {"robot_mass_kg": robot_mass, "steps_dir": str(steps_dir) if steps_dir else None}
-    config.write_manifest(run_dir, status="running", **info)
-    if steps_dir:
-        write_fields_json(steps_dir / "fields.json", conf)
-
-    tasks = [{"conf": conf, "spec": spec, "situation": s, "seed": seed, "run_dir": str(run_dir),
-              "steps_dir": str(steps_dir) if steps_dir else None}
-             for spec in specs for seed in conf["seeds"] for s in situations]
-    workers = conf["workers"] or os.cpu_count()
-    log.info(f"{len(tasks)} tasks (controller x seed x situation), {conf['episodes_per_situation']} episodes each, "
-             f"{workers} workers")
-    t0 = time.time()
-    episodes = pd.DataFrame(run_all(tasks, workers, run_dir / "log.txt"))
-    episodes["order"] = episodes.situation.map({s["name"]: i for i, s in enumerate(situations)})
-    episodes = episodes.sort_values(["controller", "seed", "order", "episode"], ignore_index=True).drop(columns="order")
-    episodes.insert(0, "run_id", run_dir.name)
-    episodes.to_parquet(run_dir / "episodes.parquet", index=False)
-    config.write_manifest(run_dir, status="done", runtime_s=time.time() - t0, episodes=len(episodes), **info)
-    log.info(f"done in {(time.time() - t0) / 60:.1f} min -> {run_dir}\n"
-             f"table: python scripts/report.py --run {run_dir.name}")
+    run_dir = evaluate_run(conf, [resolve(c) for c in args.controllers], situations, name)
+    log.info(f"table: python scripts/report.py --run {run_dir.name}")
 
 
 if __name__ == "__main__":

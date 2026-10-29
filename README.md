@@ -94,6 +94,9 @@ are in [configs/training.yaml](configs/training.yaml).
 | Train a specialist (GPU) | `python scripts/train.py ppo --situation slope_down` |
 | Train every family (GPU) | `python scripts/train.py ppo --situation all` (one run per family, one after the other) |
 | Evaluate it | add `specialist_slope_down: {type: onnx, run: <run folder>}` to [configs/policies.yaml](configs/policies.yaml), then `python scripts/evaluate.py alpha_walking specialist_slope_down --suite fixed` |
+| Choose the specialist (one command) | `python scripts/choose_checkpoint.py --run <training run> --only "face_*_downhill,pyramid_*"`, then add the printed entry to [configs/policies.yaml](configs/policies.yaml) |
+| Upload a specialist to Hugging Face | `python scripts/upload_to_hf.py --run <choose, convert or training run>` |
+| Only the candidates, no simulation | `python scripts/choose_checkpoint.py --run <training run> --shortlist --states <evaluation run> --source <specialist> --only "face_*_downhill,pyramid_*"` |
 | Evaluate an intermediate checkpoint | `python scripts/convert.py checkpoint --run <training run> --iteration 400`, then add the printed `run:` entry to [configs/policies.yaml](configs/policies.yaml) and evaluate it |
 | Distance from alpha_walking | `python scripts/action_distance.py --run <evaluation run> --controller alpha_walking [--source <specialist>] [--only <situations>]` |
 
@@ -107,6 +110,31 @@ per-step data, i.e. no `--no-record`), and the table `results/tables/action_dist
 difference between the two actions per situation, without the steps just before a fall, and per joint. About
 1 minute for 40 situations x 20 episodes x 2 specialists.
 
+`choose_checkpoint.py` chooses the specialist among the checkpoints of a training run, in one command:
+1. it evaluates the last checkpoint on the given situations (`--only` takes names or patterns), recording the
+   per-step data;
+2. it shortlists the candidates. For each `model_<it>.pt` it takes the training curves averaged around that
+   iteration (reward, % of episodes ended in a fall, terrain ladder, action std) and its distance from
+   `alpha_walking` on those states. A checkpoint is on the plateau when it has reached the whole ladder and its fall
+   share is close to the best one (rule: `ppo.checkpoint_choice` in [configs/training.yaml](configs/training.yaml)).
+   The candidates are the plateau checkpoint closest to `alpha_walking`, the middle one and the last;
+3. it evaluates the other candidates on the same episodes;
+4. it measures each candidate's distance from `alpha_walking` on its own states;
+5. it applies the rule: fewest falls, and among equivalent candidates (overlapping Wilson intervals of falls and
+   successes) the one closest to `alpha_walking`.
+
+With `--shortlist` it stops after step 2. With `--states <evaluation run> --source <controller>` as well, step 2
+uses the states of an existing evaluation: nothing is simulated (about 30 s).
+
+It writes `runs/<YYYYMMDD-HHMM>_choose_<training run>/`, holding:
+- the ONNX of each candidate, and the chosen one as `<run folder>.onnx`;
+- `checkpoints.csv` (the curves) and `choice.csv` (falls, successes, Wilson intervals, distance, `chosen`);
+- `config.yaml`, `run.json` and `log.txt`.
+
+It prints the `policies.yaml` entry for the chosen checkpoint. The two evaluations are ordinary evaluation runs. With
+`--episodes 2` it is a quick test; with the default 20 episodes it takes as long as evaluating three policies on the
+family's situations.
+
 **Weights & Biases.** Training runs are logged to W&B as set in the `wandb` block of
 [configs/training.yaml](configs/training.yaml): project, entity, group, tags (the family is added),
 mode (`online` / `offline`) and checkpoint upload. The W&B run takes the name of the run folder, and its
@@ -119,7 +147,13 @@ config includes the whole `ppo` section of training.yaml. Log in once per machin
 which is also the name of the W&B run. The repo holds the ONNX, the last checkpoint, `config.yaml`,
 `run.json` and a short model card; `run.json` records the repo id. Settings in the `huggingface` block of
 training.yaml (upload on/off, namespace, private). Log in once with `huggingface-cli login` (or
-`export HF_TOKEN=...`). To evaluate a policy from its repo, add to configs/policies.yaml
+`export HF_TOKEN=...`). `scripts/upload_to_hf.py --run <run>` uploads later, with the settings saved in the training
+run:
+- given a training run, its last checkpoint, as above;
+- given a `convert` or `choose` run, the checkpoint it converted, to `<namespace>/<family>-<timestamp>-it<it>`, with
+  that run's files in a folder.
+
+It prints the `hf:` entry for `policies.yaml`. To evaluate a policy from its repo, add to configs/policies.yaml
 `specialist_slope_down: {type: onnx, hf: [<namespace>/slope_down-<timestamp>, <run folder>.onnx]}`.
 
 ## Tests

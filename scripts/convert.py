@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-import tempfile
-from pathlib import Path
 
 from steerduck import config
-from steerduck.policy import checkpoint_to_onnx, onnx_difference
+from steerduck.policy import check_checkpoint_conversion, checkpoint_to_onnx, training_checkpoints
 
 log = logging.getLogger("steerduck")
 
@@ -31,18 +29,10 @@ def main():
 
     train = config.find_run(args.run)
     template = train / f"{train.name}.onnx"
-    checkpoints = {int(path.stem.split("_")[1]): path for path in train.glob("model_*.pt")}
+    checkpoints = training_checkpoints(train)
     if args.iteration not in checkpoints:
-        raise SystemExit(f"{train.name}: no model_{args.iteration}.pt; checkpoints: {sorted(checkpoints)}")
-    if not template.is_file():
-        raise SystemExit(f"{template} not found: it is the graph the checkpoint is written into")
-
-    with tempfile.TemporaryDirectory() as tmp:
-        check = Path(tmp) / "last.onnx"
-        checkpoint_to_onnx(checkpoints[max(checkpoints)], template, check)
-        diff = onnx_difference(check, template)
-    if diff > 1e-6:
-        raise SystemExit(f"the last checkpoint differs from {template.name} by {diff:.1e}: the conversion is wrong")
+        raise SystemExit(f"{train.name}: no model_{args.iteration}.pt; checkpoints: {list(checkpoints)}")
+    diff = check_checkpoint_conversion(train)
 
     run_dir = config.new_run("convert", f"{train.name}_it{args.iteration}")
     config.setup_logging(run_dir / "log.txt")

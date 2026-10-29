@@ -184,6 +184,29 @@ def checkpoint_to_onnx(checkpoint, template, out):
     onnx.save(model, str(out))
 
 
+def training_checkpoints(train: Path) -> dict:
+    """{iteration: path of model_<it>.pt} of a training run, sorted by iteration."""
+    paths = {int(p.stem.split("_")[1]): p for p in train.glob("model_*.pt")}
+    if not paths:
+        raise FileNotFoundError(f"{train}: no model_<it>.pt")
+    return dict(sorted(paths.items()))
+
+
+def check_checkpoint_conversion(train: Path) -> float:
+    """Check checkpoint_to_onnx on a training run: its last checkpoint must give the actions of the run's own ONNX
+    (the policy evaluated so far) -> the largest difference; ValueError above 1e-6."""
+    import tempfile
+    template = train / f"{train.name}.onnx"
+    if not template.is_file():
+        raise FileNotFoundError(f"{template} not found: it is the graph the checkpoints are written into")
+    with tempfile.TemporaryDirectory() as tmp:
+        checkpoint_to_onnx(list(training_checkpoints(train).values())[-1], template, f"{tmp}/last.onnx")
+        diff = onnx_difference(f"{tmp}/last.onnx", template)
+    if diff > 1e-6:
+        raise ValueError(f"the last checkpoint differs from {template.name} by {diff:.1e}: the conversion is wrong")
+    return diff
+
+
 def onnx_difference(a, b, n: int = 1000) -> float:
     """Largest difference between the actions of two ONNX policies on the same random observations."""
     import onnxruntime as ort

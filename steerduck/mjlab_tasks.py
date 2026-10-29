@@ -139,33 +139,45 @@ def _set_learning_rate(alg, schedule: str, learning_rate: float):
         group["lr"] = learning_rate
 
 
-def upload_to_huggingface(run_dir: Path, family: str, ppo: dict) -> str:
+def upload_to_huggingface(run_dir: Path, family: str, ppo: dict, checkpoint_run: Path | None = None,
+                          iteration: int | None = None) -> str:
     """Upload a trained specialist to the Hugging Face model repo <namespace>/<family>-<YYYYMMDD-HHMM>.
     The timestamp is the one of the run folder (<YYYYMMDD-HHMM>_train_ppo_<family>), which is also the name
-    of the W&B run: repo, local run and W&B run point to the same training. -> the repo id."""
+    of the W&B run: repo, local run and W&B run point to the same training. With checkpoint_run (a convert or
+    choose run of this training, whose <run_id>.onnx is model_<iteration>.pt): that checkpoint instead of the
+    last one, to <namespace>/<family>-<YYYYMMDD-HHMM>-it<iteration>, with the files of checkpoint_run in a folder
+    of the same name. -> the repo id."""
     from huggingface_hub import HfApi
 
     api = HfApi()
     hf = ppo["huggingface"]
     namespace = hf["namespace"] or api.whoami()["name"]
     timestamp = run_dir.name.split("_")[0]
-    repo_id = f"{namespace}/{family}-{timestamp}"
+    if checkpoint_run is None:
+        onnx = run_dir / f"{run_dir.name}.onnx"
+        checkpoint = max(run_dir.glob("model_*.pt"), key=lambda path: int(path.stem.split("_")[1]))
+        repo_id, extra, which = f"{namespace}/{family}-{timestamp}", [], "the last"
+    else:
+        onnx, checkpoint = checkpoint_run / f"{checkpoint_run.name}.onnx", run_dir / f"model_{iteration}.pt"
+        repo_id, which = f"{namespace}/{family}-{timestamp}-it{iteration}", f"the iteration {iteration}"
+        extra = [p for p in checkpoint_run.iterdir() if p.is_file() and p != onnx]
 
-    onnx = run_dir / f"{run_dir.name}.onnx"
-    last_checkpoint = max(run_dir.glob("model_*.pt"), key=lambda path: int(path.stem.split("_")[1]))
-    files = [onnx, last_checkpoint, run_dir / "config.yaml", run_dir / "run.json"]
+    files = [onnx, checkpoint, run_dir / "config.yaml", run_dir / "run.json"]
     model_card = (
-        f"# {family} specialist ({timestamp})\n\n"
+        f"# {family} specialist ({timestamp}{f', iteration {iteration}' if checkpoint_run else ''})\n\n"
         f"Microduck walking policy: `{ppo['init_controller']}` fine-tuned with PPO on the `{family}` family.\n\n"
         f"- training run and W&B run: `{run_dir.name}` "
         f"(W&B project `{ppo['wandb']['project']}`, group `{ppo['wandb']['group']}`)\n"
         f"- `{onnx.name}`: the policy, 61 observations -> 14 actions\n"
-        f"- `{last_checkpoint.name}`: the last rsl_rl checkpoint (actor and critic)\n"
-        f"- `config.yaml`, `run.json`: configuration and manifest of the run\n")
+        f"- `{checkpoint.name}`: {which} rsl_rl checkpoint (actor and critic)\n"
+        f"- `config.yaml`, `run.json`: configuration and manifest of the training run\n"
+        + (f"- `{checkpoint_run.name}/`: the run that made the checkpoint into ONNX\n" if checkpoint_run else ""))
 
     api.create_repo(repo_id, private=hf["private"], exist_ok=True)
     for path in files:
         api.upload_file(path_or_fileobj=path, path_in_repo=path.name, repo_id=repo_id)
+    for path in extra:
+        api.upload_file(path_or_fileobj=path, path_in_repo=f"{checkpoint_run.name}/{path.name}", repo_id=repo_id)
     api.upload_file(path_or_fileobj=model_card.encode(), path_in_repo="README.md", repo_id=repo_id)
     return repo_id
 

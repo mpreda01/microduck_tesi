@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import zlib
+from fnmatch import fnmatch
 from importlib import metadata
 from pathlib import Path
 
@@ -80,8 +81,13 @@ def load_situations():
     return situations, conf.get("suites", {})
 
 
+def matches(name: str, patterns) -> bool:
+    """True if a situation name matches one of the names or patterns (face_*_downhill), or if patterns is empty."""
+    return not patterns or any(fnmatch(name, p) for p in patterns)
+
+
 def select_situations(suite: str = "all", only=None) -> list[dict]:
-    """The situations of a suite, optionally only those named in `only`."""
+    """The situations of a suite, optionally only those matching `only` (names or patterns)."""
     situations, suites = load_situations()
     if suite == "all":
         chosen = [s["name"] for s in situations]
@@ -91,10 +97,11 @@ def select_situations(suite: str = "all", only=None) -> list[dict]:
         chosen = [s["name"] for s in situations if s["group"] in suites[suite]["groups"]]
     else:
         chosen = suites[suite]
-    unknown = (set(chosen) | set(only or [])) - {s["name"] for s in situations}
+    names = [s["name"] for s in situations]
+    unknown = (set(chosen) - set(names)) | {p for p in only or [] if not any(matches(n, [p]) for n in names)}
     if unknown:
         raise ValueError(f"unknown situations: {sorted(unknown)}")
-    return [s for s in situations if s["name"] in chosen and (not only or s["name"] in only)]
+    return [s for s in situations if s["name"] in chosen and matches(s["name"], only)]
 
 
 def situation_seed(name: str, seed: int) -> int:
