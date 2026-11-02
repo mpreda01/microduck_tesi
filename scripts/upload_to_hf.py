@@ -3,8 +3,9 @@ with the huggingface settings saved in the training run (namespace null = the lo
 
 --run takes:
 - a training run: its last checkpoint, to <namespace>/<family>-<YYYYMMDD-HHMM> (as train.py);
-- a convert or choose run of a training: the checkpoint it made into ONNX (model_<it>.pt), to
-  <namespace>/<family>-<YYYYMMDD-HHMM>-it<it>, with the files of that run in a folder.
+- a convert or choose run of a training: only the checkpoint it converted or chose (chosen_iteration in the
+  config.yaml of a choose run), to <namespace>/<family>-<YYYYMMDD-HHMM>-it<it>, as <family>-<YYYYMMDD-HHMM>-it<it>.onnx
+  with its model_<it>.pt; the other candidates of a choose run are not uploaded.
 Log in once with `huggingface-cli login` (or export HF_TOKEN=...).
 
 Examples:
@@ -36,8 +37,8 @@ def main():
 
     train_conf = config.load_yaml(train / "config.yaml")
     repo_id = upload_to_huggingface(train, train_conf["family"], train_conf["ppo"], checkpoint_run, iteration)
-    onnx = f"{(checkpoint_run or train).name}.onnx"
     name = f"{train_conf['family']}-{train.name.split('_')[0]}" + (f"-it{iteration}" if iteration else "")
+    onnx = f"{name}.onnx" if checkpoint_run else f"{train.name}.onnx"
     print(f"uploaded to https://huggingface.co/{repo_id}\n"
           f"configs/policies.yaml: `{name}: {{type: onnx, hf: [{repo_id}, {onnx}]}}`")
 

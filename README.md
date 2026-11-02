@@ -150,8 +150,9 @@ training.yaml (upload on/off, namespace, private). Log in once with `huggingface
 `export HF_TOKEN=...`). `scripts/upload_to_hf.py --run <run>` uploads later, with the settings saved in the training
 run:
 - given a training run, its last checkpoint, as above;
-- given a `convert` or `choose` run, the checkpoint it converted, to `<namespace>/<family>-<timestamp>-it<it>`, with
-  that run's files in a folder.
+- given a `convert` or `choose` run, only the checkpoint it converted or chose, to
+  `<namespace>/<family>-<timestamp>-it<it>`. The repo holds `<family>-<timestamp>-it<it>.onnx`, `model_<it>.pt`, the
+  training's `config.yaml` and `run.json`, and a model card naming the source run; the other candidates stay local.
 
 It prints the `hf:` entry for `policies.yaml`. To evaluate a policy from its repo, add to configs/policies.yaml
 `specialist_slope_down: {type: onnx, hf: [<namespace>/slope_down-<timestamp>, <run folder>.onnx]}`.
