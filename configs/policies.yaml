@@ -34,3 +34,9 @@ slope_down-20261027-2240:
 slope_down-20261027-2240-it400:
   type: onnx
   hf: [mpreda/slope_down-20261027-2240-it400, slope_down-20261027-2240-it400.onnx]
+
+
+alpha_walking+sae_h2: 
+  {type: sae, 
+  base: alpha_walking, 
+  run: 20261102-1819_train_sae_h2}

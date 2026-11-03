@@ -328,3 +328,85 @@ candidati proposti:
   finché la 300 non è valutata: la 400 è al 100% in salita. Se anche la 300 fosse al 100%, per la regola andrebbe
   scelta la 300, più vicina ad alpha (0,0086 contro 0,0105 sugli stati della finale). Attenzione: alla 300 la scala
   è completa da poche decine di iterazioni.
+
+FASE 3, PASSO 1: PRIMO SAE SU h2 (TENTATIVO FALLITO: LA POLICY CON LA RICOSTRUZIONE NON CAMMINA COME ALPHA)
+codice: steerduck/interpret.py, steerduck/steering.py (HookedController), scripts/train.py sae, sezione sae di
+configs/training.yaml, tipo sae in configs/policies.yaml; scritto sopra il commit cae6120 (non ancora committato:
+indicare qui il commit quando c'è)
+
+dati di input:
+- dataset: data/20261028-1239_evaluate_alpha_walking_all (alpha_walking, 87 situazioni, 20 episodi, seme 0, con le
+  activation h1, h2, h3)
+- training: python scripts/train.py sae --run 20261028-1239_evaluate_alpha_walking_all -> runs/20261102-1819_train_sae_h2
+  (sae.pt, probes.csv, features.csv)
+- verifica in simulazione: alpha_walking+sae_h2 in configs/policies.yaml -> runs/20261102-1916_evaluate_alpha_walking+sae_h2_all,
+  tabella results/tables/20261102-1916_evaluate_alpha_walking+sae_h2_all+20261028-1239_evaluate_alpha_walking_all.csv
+  (stessi episodi di alpha: confronto accoppiato)
+
+architettura (SAE TopK):
+- input: l'activation h2 di alpha_walking (256 numeri, uscita della ELU del secondo hidden layer);
+- encoder: z = TopK(ReLU(W_enc (h - b_dec) + b_enc)), con 1024 elementi nel dictionary e solo i k = 16 pesi più
+  grandi diversi da zero;
+- decoder: h' = W_dec z + b_dec; le 1024 colonne di W_dec sono gli elementi del dictionary, tenute a norma 1;
+- nella policy (alpha_walking+sae_h2): h2 viene sostituita da h' e la rete prosegue con i pesi di alpha invariati.
+
+hyperparametri del training:
+- loss: errore quadratico tra h e h'; Adam, learning rate 1e-3, batch 1024, 10 epoche, seme 0, CPU (circa 2 minuti);
+- inizializzazione: W_enc = W_dec trasposta, b_enc = 0, b_dec = media delle activation;
+- dati: un passo registrato ogni 5 (10 Hz), 273.891 passi; test = gli episodi 0, 5, 10, 15 di ogni situazione
+  (55.212 passi), mai usati in training.
+
+risultati offline (episodi di test):
+- FVU (varianza non ricostruita) 1,05%, ancora in calo alla decima epoca (4,0% -> 1,05%);
+- 48% degli elementi del dictionary mai attivi: in pratica circa 530 elementi su 1024;
+- differenza di azioni alpha vs alpha+SAE sugli stati del piano: errore quadratico medio 9e-5, circa 100 volte meno
+  della distanza alpha-specialista (0,009);
+- probe lineari, R² sul test (h1 / h2 / h3): inclinazione del corpo (gravity_b) 0,99 / 0,98 / 0,92, potenza
+  0,97 / 0,95 / 0,92, velocità del corpo 0,94 / 0,92 / 0,86, piedi (contatto, volo, altezza) 0,88-0,94, attrito
+  0,83 / 0,81 / 0,69, carico 0,74 / 0,69 / 0,51, pendenza del terreno 0,74 / 0,73 / 0,66, terrain_value
+  0,41 / 0,40 / 0,34. Quasi tutto è leggibile linearmente, e meno salendo da h1 a h3;
+- nomi degli elementi (correlazione con le grandezze del simulatore): i più chiari sono legati a tempo in volo e
+  altezza dei piedi e all'inclinazione del corpo (r fino a 0,70); nessun elemento è legato alla pendenza del terreno
+  (r <= 0,10).
+
+risultati in simulazione (87 situazioni x 20 episodi):
+                          successi   cadute
+  alpha_walking           769        571
+  alpha_walking+sae_h2    718        700 (+23%)
+- uguali nelle situazioni facili: piano, onde, grid bassa, carico al centro o in alto, pendenze fino a 3-4°;
+- peggiori dove alpha è al limite: payload_40pct_side successi 19 -> 2, payload_40pct_back cadute 0 -> 17,
+  trans_payload_30pct_back successi 20 -> 10, friction_0.175 cadute 1 -> 11, rubble 1,3-1,9 cm cadute 53 -> 102,
+  stairs_down_1.0cm cadute 1 -> 5;
+- dove alpha resta ferma (rubble, gradini in salita) la versione con il SAE prova a camminare e cade; in discesa
+  accelera (face_5.5deg_downhill: avanzamento 4,97 -> 8,72 m, potenza 4,2 -> 9,0 W);
+- alcuni cambi in meglio (face_6deg_uphill successi 3 -> 10, face_6.5deg_uphill 0 -> 5): anche questi dicono che il
+  comportamento è cambiato.
+- il piano (sezione 3.6) chiede che la policy con la ricostruzione cammini come l'originale: la verifica non è
+  superata e il SAE va migliorato prima di usarlo.
+
+diagnostica: errore per situazione (script nella scratchpad; ora train.py sae scrive error_by_situation.csv)
+- errore di ricostruzione per situazione = errore quadratico medio / varianza media di h2, sugli episodi di test
+  (piano 0,0014; media 0,010):
+  - il più alto negli stati rari, di caduta o appena prima: stairs_up_1.75cm 0,17, face_9deg_downhill 0,14,
+    payload_40pct_front 0,14, friction_0.125 0,10. Lì alpha cade già 20/20 e il comportamento non può cambiare;
+  - dove la policy peggiora di più l'errore è sotto la media: payload_40pct_back 0,0040, payload_40pct_side 0,0056,
+    trans_payload_30pct_back 0,0041, friction_0.175 0,017;
+- lo stesso con l'errore sulle azioni (alpha vs alpha+SAE sugli stessi stati di test): payload_40pct_back 0,0003,
+  payload_40pct_side 0,0004, sotto la mediana (0,0006);
+- correlazione tra errore e cambiamento di comportamento (|differenza di cadute| + |differenza di successi|):
+  Spearman 0,17 (p = 0,12) per l'errore sulle activation, 0,18 (p = 0,10) per quello sulle azioni: debole.
+
+interpretazione:
+- l'errore a ogni passo è piccolo, ma si accumula a circuito chiuso: con un carico dietro o di lato una piccola
+  deviazione sistematica delle azioni porta il robot fuori dagli stati che alpha conosce, e da lì gli errori crescono
+  finché cade o si ferma. Misurare l'errore sugli stati registrati da alpha (a circuito aperto) non lo vede: è lo
+  stesso spostamento di distribuzione (covariate shift) per cui la distillazione usa DAgger;
+- quindi FVU ed errore per situazione servono a confrontare due SAE tra loro, ma non sostituiscono la verifica in
+  simulazione;
+- l'errore va ridotto ovunque, non solo negli stati rari; metà del dictionary è inutilizzata e la FVU calava ancora.
+
+prossimi tentativi, in ordine di costo:
+1) k 32 o 64 ed epoche finché la FVU smette di scendere (solo training.yaml);
+2) step_stride 1: cinque volte più dati;
+3) meno elementi morti: dictionary_size 512, oppure una loss ausiliaria che riattiva gli elementi inutilizzati;
+4) se non basta: SAE addestrato anche sull'errore delle azioni della policy (loss end-to-end), più codice.

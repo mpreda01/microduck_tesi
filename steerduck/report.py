@@ -144,17 +144,16 @@ def compare_to_reference(table: pd.DataFrame, episodes: pd.DataFrame, conf: dict
     return table
 
 
-def recorded_steps(run_dir, source: str, only=None):
-    """Yield (situation, obs, action, before_fall) for each situation of an evaluation run with per-step data of
-    `source`. only: situation names or patterns (face_*_downhill); before_fall excludes the steps less than
-    fall_horizon_s before a fall."""
+def recorded_steps(run_dir, source: str, only=None, fields=("obs", "action", "falls_within_2s")):
+    """Yield (situation, {field: array over the seeds}) for each situation of an evaluation run with per-step data of
+    `source`. only: situation names or patterns (face_*_downhill); fields: names of rollout.STEP_FIELDS
+    (falls_within_2s marks the steps less than fall_horizon_s before a fall)."""
     conf, steps_dir = load_yaml(run_dir / "config.yaml"), DATA / run_dir.name
     for s in conf["situations"]:
         files = sorted((steps_dir / source).glob(f"{s['name']}__seed*.npz"))
         if files and matches(s["name"], only):
             data = [np.load(f) for f in files]
-            obs, action, falls = (np.concatenate([d[k] for d in data]) for k in ("obs", "action", "falls_within_2s"))
-            yield s, obs, action, ~falls
+            yield s, {k: np.concatenate([d[k] for d in data]) for k in fields}
 
 
 def action_distance(run: str, controller: str, sources=None, only=None) -> pd.DataFrame:
@@ -177,8 +176,8 @@ def action_distance(run: str, controller: str, sources=None, only=None) -> pd.Da
     joints = json.loads((steps_dir / "fields.json").read_text())["joint_order"]
     spec, rows = resolve(controller), []
     for source in sources or recorded:
-        for s, obs, action, before_fall in recorded_steps(run_dir, source, only):
-            sq = (action - relabel(spec, obs)) ** 2
+        for s, d in recorded_steps(run_dir, source, only):
+            sq, before_fall = (d["action"] - relabel(spec, d["obs"])) ** 2, ~d["falls_within_2s"]
             rows.append({"source": source, "controller": controller, "situation": s["name"], "group": s["group"],
                          "steps": len(sq), "mse": sq.mean(),
                          "mse_before_falls": sq[before_fall].mean() if before_fall.any() else np.nan,
@@ -225,7 +224,8 @@ def checkpoint_choice(train_run: str, states_run: str, source: str, only=None):
     steps = list(recorded_steps(states, source, only))
     if not steps:
         raise ValueError(f"{states.name}: no per-step data of {source} for these situations")
-    obs, before_fall = (np.concatenate([step[k] for step in steps])[::rule["state_stride"]] for k in (1, 3))
+    obs, falls = (np.concatenate([d[k] for _, d in steps])[::rule["state_stride"]] for k in ("obs", "falls_within_2s"))
+    before_fall = ~falls
     start = relabel(resolve(ppo["init_controller"]), obs)
     curves = training_curves(train, rule["window_iterations"])
     rows = []

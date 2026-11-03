@@ -226,6 +226,8 @@ def resolve(name: str) -> dict:
     if name not in registry:
         raise KeyError(f"controller {name!r} not in configs/policies.yaml; known: {', '.join(registry)}")
     entry = registry[name]
+    if entry["type"] == "sae":   # the base controller with one activation replaced by its SAE reconstruction
+        return resolve(entry["base"]) | {"name": name, "type": "sae", "sae": str(RUNS / entry["run"] / "sae.pt")}
     if "path" in entry:
         path = MODELS / entry["path"]
     elif "run" in entry:   # the policy exported by a training run, before it is promoted to models/
@@ -268,4 +270,9 @@ def relabel(spec: dict, obs: np.ndarray) -> np.ndarray:
 def build_controller(spec: dict, record_activations: bool = False) -> Controller:
     if spec["type"] == "onnx":
         return OnnxController(spec["name"], spec["path"], record_activations)
+    if spec["type"] == "sae":
+        from steerduck.interpret import load_sae
+        from steerduck.steering import HookedController
+        sae = load_sae(spec["sae"])
+        return HookedController(spec["name"], spec["path"], sae.layer, sae)
     raise ValueError(f"unknown controller type {spec['type']!r}")

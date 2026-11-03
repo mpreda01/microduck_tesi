@@ -157,6 +157,26 @@ run:
 It prints the `hf:` entry for `policies.yaml`. To evaluate a policy from its repo, add to configs/policies.yaml
 `specialist_slope_down: {type: onnx, hf: [<namespace>/slope_down-<timestamp>, <run folder>.onnx]}`.
 
+## Phase 3: library of corrections
+
+Step 1 of the plan: the SAE and the linear probes, on the activations that `alpha_walking` recorded in every
+situation (an evaluation run without `--no-record` and `--no-activations`). Parameters in the `sae` section of
+[configs/training.yaml](configs/training.yaml).
+
+| Step | Command (same prefix as phase 1) |
+|---|---|
+| SAE and probes | `python scripts/train.py sae --run 20261028-1239_evaluate_alpha_walking_all` |
+| Check that the policy still walks with the SAE's reconstruction | add the printed `alpha_walking+sae_h2: {type: sae, base: alpha_walking, run: <run folder>}` to [configs/policies.yaml](configs/policies.yaml), then `python scripts/evaluate.py alpha_walking+sae_h2 --no-activations` and compare with `report.py --run <that run> <alpha_walking's run>` |
+
+`train.py sae` writes `runs/<YYYYMMDD-HHMM>_train_sae_<layer>/` with:
+- `sae.pt`;
+- `probes.csv`: R² of a linear probe on the test episodes, per layer and quantity;
+- `features.csv`: each dictionary element named after the quantity it correlates with most;
+- `error_by_situation.csv`: the reconstruction error of each situation on the test episodes;
+- `run.json`: test FVU and the share of dictionary elements never active.
+
+It takes about 2 minutes on CPU (275k steps).
+
 ## Tests
 
 ```bash

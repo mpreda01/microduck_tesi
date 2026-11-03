@@ -59,3 +59,21 @@ ppo:
       - {terrain: face_slope, deg: [2.0, 10.0], direction: downhill}
     slope_up:
       - {terrain: face_slope, deg: [2.0, 10.0], direction: uphill}
+
+# ---- sae: the SAE and the linear probes of phase 3, step 1 (scripts/train.py sae --run <evaluation run>) ----
+# Trained on the activations recorded by `controller` in an evaluation run of every situation, recorded with the
+# activations (e.g. 20261028-1239_evaluate_alpha_walking_all). The probes use h1, h2 and h3; the SAE one layer.
+sae:
+  controller: alpha_walking
+  layer: h2                        # 256 neurons, the plan's example (section 3.2)
+  dictionary_size: 1024            # dictionary elements (plan section 3.6)
+  k: 16                            # TopK: elements used to write each activation
+  epochs: 10
+  batch_size: 1024
+  learning_rate: 1.0e-3
+  seed: 0
+  step_stride: 5                   # every 5th recorded step (10 Hz): neighbouring steps are nearly equal
+  test_every_n_episodes: 5         # test set: episodes 0, 5, 10, 15 of every situation, never seen in training
+  # ground truth (rollout.STEP_FIELDS) for the probes and for naming the dictionary elements
+  quantities: [lin_vel_b, ang_vel_b, gravity_b, foot_contact, foot_height, foot_air_time, power, ground_slope_deg,
+               terrain_value, friction, payload_kg]
