@@ -36,7 +36,13 @@ slope_down-20261027-2240-it400:
   hf: [mpreda/slope_down-20261027-2240-it400, slope_down-20261027-2240-it400.onnx]
 
 
-alpha_walking+sae_h2: 
+alpha_walking+sae_h2:       # first failed experiment, during evaluation was different than alpha_walking
   {type: sae, 
   base: alpha_walking, 
   run: 20261102-1819_train_sae_h2}
+
+alpha_walking+sae_h2_k32: 
+  {type: sae, 
+  base: alpha_walking, 
+  run: 20261103-1806_train_sae_h2}
+

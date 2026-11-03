@@ -66,13 +66,13 @@ ppo:
 sae:
   controller: alpha_walking
   layer: h2                        # 256 neurons, the plan's example (section 3.2)
-  dictionary_size: 1024            # dictionary elements (plan section 3.6)
-  k: 16                            # TopK: elements used to write each activation
-  epochs: 10
+  dictionary_size: 512            # dictionary elements (plan section 3.6)
+  k: 32                            # TopK: elements used to write each activation
+  epochs: 30
   batch_size: 1024
   learning_rate: 1.0e-3
   seed: 0
-  step_stride: 5                   # every 5th recorded step (10 Hz): neighbouring steps are nearly equal
+  step_stride: 1                 # every 5th recorded step (10 Hz): neighbouring steps are nearly equal
   test_every_n_episodes: 5         # test set: episodes 0, 5, 10, 15 of every situation, never seen in training
   # ground truth (rollout.STEP_FIELDS) for the probes and for naming the dictionary elements
   quantities: [lin_vel_b, ang_vel_b, gravity_b, foot_contact, foot_height, foot_air_time, power, ground_slope_deg,

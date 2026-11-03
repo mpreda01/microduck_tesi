@@ -331,8 +331,7 @@ candidati proposti:
 
 FASE 3, PASSO 1: PRIMO SAE SU h2 (TENTATIVO FALLITO: LA POLICY CON LA RICOSTRUZIONE NON CAMMINA COME ALPHA)
 codice: steerduck/interpret.py, steerduck/steering.py (HookedController), scripts/train.py sae, sezione sae di
-configs/training.yaml, tipo sae in configs/policies.yaml; scritto sopra il commit cae6120 (non ancora committato:
-indicare qui il commit quando c'è)
+configs/training.yaml, tipo sae in configs/policies.yaml; commit: 3d9fd7f80289f374f196db62c695ad6758377d6e
 
 dati di input:
 - dataset: data/20261028-1239_evaluate_alpha_walking_all (alpha_walking, 87 situazioni, 20 episodi, seme 0, con le
@@ -410,3 +409,23 @@ prossimi tentativi, in ordine di costo:
 2) step_stride 1: cinque volte più dati;
 3) meno elementi morti: dictionary_size 512, oppure una loss ausiliaria che riattiva gli elementi inutilizzati;
 4) se non basta: SAE addestrato anche sull'errore delle azioni della policy (loss end-to-end), più codice.
+
+FASE 3, PASSO 1: SECONDO SAE SU h2 (VERIFICA SUPERATA, TRANNE I CARICHI SUL RETRO)
+training: runs/20261103-1806_train_sae_h2 (policy alpha_walking+sae_h2_k32); valutazione:
+runs/20261103-1825_evaluate_alpha_walking+sae_h2_k32_all, tabella
+results/tables/20261103-1825_evaluate_alpha_walking+sae_h2_k32_all+20261028-1239_evaluate_alpha_walking_all.csv
+
+hyperparametri cambiati: dictionary_size 512 (era 1024), k 32 (era 16), 30 epoche (erano 10), step_stride 1 (era 5,
+1.369.341 passi). Offline: FVU 0,36% (era 1,05%), 6,25% di elementi morti (era 48%).
+
+risultati in simulazione (87 situazioni x 20 episodi):
+                            successi   cadute
+  alpha_walking             769        571
+  alpha_walking+sae_h2      718        700   (primo SAE)
+  alpha_walking+sae_h2_k32  767        596
+- in 77 situazioni su 87 la differenza è entro 2 successi e 2 cadute;
+- ECCEZIONE: con il SAE la policy cade con il carico sul retro: payload_50pct_back cadute 3 -> 19 (alpha resta
+  ferma 17 volte su 20, con il SAE solo 1), payload_40pct_back 0 -> 4. Gruppo payload: cadute 43 -> 63. Senza
+  payload_50pct_back le cadute sono 568 contro 577.
+- conseguenza: il SAE si usa per i passi successivi, ma nelle valutazioni con steering il riferimento è alpha + SAE
+  senza modifiche, e sui carichi sul retro parte dell'effetto può venire dal SAE.
