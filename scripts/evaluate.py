@@ -30,6 +30,7 @@ def parse_args():
     p.add_argument("--suite", help="suite of configs/situations.yaml (default: eval.yaml's)")
     p.add_argument("--only", help="comma-separated situation names or patterns (face_*_downhill): only these")
     p.add_argument("--episodes", type=int, help="episodes per situation")
+    p.add_argument("--seeds", help="comma-separated seeds (default: eval.yaml's), e.g. 42 for episodes not distilled on")
     p.add_argument("--workers", type=int, help="parallel processes (0 = one per CPU core)")
     p.add_argument("--action-noise", type=float, help="std of the Gaussian noise added to every action")
     p.add_argument("--no-record", action="store_true", help="no per-step data")
@@ -47,6 +48,7 @@ def main():
     args = parse_args()
     conf = config.load_yaml(config.CONFIGS / "eval.yaml")
     overrides = {"suite": args.suite, "episodes_per_situation": args.episodes, "workers": args.workers,
+                 "seeds": [int(s) for s in args.seeds.split(",")] if args.seeds else None,
                  "action_noise_std": args.action_noise, "record_steps": False if args.no_record else None,
                  "record_activations": False if args.no_activations else None,
                  "video": False if args.no_video else None}
@@ -62,6 +64,8 @@ def main():
     name = args.name or "+".join(args.controllers or ["preview"]) + f"_{conf['suite']}" + ("_only" if args.only else "")
     if conf["action_noise_std"]:
         name += f"_noise{conf['action_noise_std']}"
+    if args.seeds:
+        name += f"_seed{args.seeds.replace(',', '-')}"
 
     if args.preview:
         import imageio

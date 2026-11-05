@@ -2,6 +2,8 @@
 #   type  onnx: a policy file run with onnxruntime
 #   hf    [repo, file] on Hugging Face, downloaded once to models/<name>/
 #   path  or a file relative to models/
+#   type  sae: {base, run}: `base` with one activation replaced by the SAE reconstruction of runs/<run>/sae.pt
+#   type  adapter: {base, run}: `base` with the steering vectors of runs/<run>/adapter.pt (train.py distill)
 #   checkpoint  [repo, file] of the full rsl_rl training checkpoint (actor, critic, normalizers, action std,
 #               optimizer) on Hugging Face, downloaded once to models/<name>/: the start of a PPO fine-tuning
 
@@ -30,6 +32,11 @@ slope_up-20261028-0021-it400:
 slope_down-20261027-2240:
   type: onnx
   hf: [mpreda/slope_down-20261027-2240, 20261027-2240_train_ppo_slope_down.onnx]
+
+# the slope_up checkpoint chosen by scripts/choose_checkpoint.py (iteration 300), the one distilled in phase 3
+slope_up-20261028-0021-it300:
+  type: onnx
+  run: 20261029-1846_choose_20261028-0021_train_ppo_slope_up
 
 slope_down-20261027-2240-it400:
   type: onnx

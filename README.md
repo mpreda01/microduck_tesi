@@ -177,6 +177,19 @@ situation (an evaluation run without `--no-record` and `--no-activations`). Para
 
 It takes about 2 minutes on CPU (275k steps).
 
+Step 2 of the plan: the constant steering vector of each specialist, with DAgger, distilled on the seeds of
+[configs/eval.yaml](configs/eval.yaml) (0) and evaluated on another one (42). Parameters in the `distill` section of
+[configs/training.yaml](configs/training.yaml): the specialist and the situations of each family.
+
+| Step | Command (same prefix as phase 1) |
+|---|---|
+| Distil the vector (h1, h2, h3 or all) | `python scripts/train.py distill --situation slope_down --layer h2` |
+| Evaluate on unseen episodes | add the printed `alpha_walking+const_h2_slope_down: {type: adapter, ...}` to [configs/policies.yaml](configs/policies.yaml), then `python scripts/evaluate.py alpha_walking slope_down-20261027-2240-it400 alpha_walking+const_h2_slope_down --only "face_*_downhill,pyramid_*,flat" --seeds 42 --no-record` and `report.py --run <that run>` |
+
+`train.py distill` writes `runs/<YYYYMMDD-HHMM>_train_distill_alpha_walking+const_<layer>_<situation>/` with
+`adapter.pt` (the DAgger iteration with most successes, then fewest falls), `adapter_it<k>.pt` and `curves.csv` (steps,
+fit error, successes and falls of each iteration). Each rollout is an evaluation run of its own.
+
 ## Tests
 
 ```bash

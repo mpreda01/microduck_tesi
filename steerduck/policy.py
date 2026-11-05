@@ -226,8 +226,9 @@ def resolve(name: str) -> dict:
     if name not in registry:
         raise KeyError(f"controller {name!r} not in configs/policies.yaml; known: {', '.join(registry)}")
     entry = registry[name]
-    if entry["type"] == "sae":   # the base controller with one activation replaced by its SAE reconstruction
-        return resolve(entry["base"]) | {"name": name, "type": "sae", "sae": str(RUNS / entry["run"] / "sae.pt")}
+    if entry["type"] in ("sae", "adapter"):   # the base controller with activations edited: runs/<run>/<type>.pt
+        kind = entry["type"]
+        return resolve(entry["base"]) | {"name": name, "type": kind, kind: str(RUNS / entry["run"] / f"{kind}.pt")}
     if "path" in entry:
         path = MODELS / entry["path"]
     elif "run" in entry:   # the policy exported by a training run, before it is promoted to models/
@@ -274,5 +275,9 @@ def build_controller(spec: dict, record_activations: bool = False) -> Controller
         from steerduck.interpret import load_sae
         from steerduck.steering import HookedController
         sae = load_sae(spec["sae"])
-        return HookedController(spec["name"], spec["path"], sae.layer, sae)
+        return HookedController(spec["name"], spec["path"], {sae.layer: sae})
+    if spec["type"] == "adapter":
+        import torch
+        from steerduck.steering import HookedController, const_edits
+        return HookedController(spec["name"], spec["path"], const_edits(torch.load(spec["adapter"])))
     raise ValueError(f"unknown controller type {spec['type']!r}")

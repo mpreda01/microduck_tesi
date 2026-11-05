@@ -60,6 +60,21 @@ ppo:
     slope_up:
       - {terrain: face_slope, deg: [2.0, 10.0], direction: uphill}
 
+# ---- distill: the constant steering vectors of phase 3, step 2 (train.py distill --situation <s> --layer <l>) ----
+# DAgger (plan section 3.2): the vector added to the activations of `base` imitates the specialist on the situations of
+# its family. The rollouts follow configs/eval.yaml (its seeds: distil on seed 0, evaluate on others with --seeds).
+distill:
+  base: alpha_walking
+  specialists:                     # the controller to imitate (policies.yaml) and its situations (names or patterns)
+    slope_down: {controller: slope_down-20261027-2240-it400, only: ["face_*_downhill", "pyramid_*"]}
+    slope_up: {controller: slope_up-20261028-0021-it300, only: ["face_*_uphill", "pit_*"]}
+  max_iterations: 6                # DAgger iterations at most
+  patience: 2                      # stop after this many iterations not better than the best (successes, then falls)
+  epochs: 5                        # passes over the whole dataset in each iteration
+  batch_size: 4096
+  learning_rate: 1.0e-3
+  seed: 0
+
 # ---- sae: the SAE and the linear probes of phase 3, step 1 (scripts/train.py sae --run <evaluation run>) ----
 # Trained on the activations recorded by `controller` in an evaluation run of every situation, recorded with the
 # activations (e.g. 20261028-1239_evaluate_alpha_walking_all). The probes use h1, h2 and h3; the SAE one layer.

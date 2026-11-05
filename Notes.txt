@@ -429,3 +429,50 @@ risultati in simulazione (87 situazioni x 20 episodi):
   payload_50pct_back le cadute sono 568 contro 577.
 - conseguenza: il SAE si usa per i passi successivi, ma nelle valutazioni con steering il riferimento è alpha + SAE
   senza modifiche, e sui carichi sul retro parte dell'effetto può venire dal SAE.
+
+FASE 3, PASSO 2: COME SCEGLIAMO IL VETTORE DISTILLATO (vettore costante, DAgger)
+codice: steerduck/distill.py, scripts/train.py distill, sezione distill di configs/training.yaml (scritto il
+03/11/2026, non ancora committato)
+comando: python scripts/train.py distill --situation <slope_down|slope_up> --layer <h1|h2|h3|all>
+specialiste imitate: slope_down-20261027-2240-it400 (face_*_downhill, pyramid_*), slope_up-20261028-0021-it300
+(face_*_uphill, pit_*). Per slope_up si usa per ora il checkpoint 300 scelto da choose_checkpoint.py, anche se cade
+4 volte su pit_9-10°: la pipeline si rifarà con la regola di scelta del checkpoint tarata meglio.
+
+semi: si distilla sul seme 0 (eval.yaml) e si valuta sul seme 42 (evaluate.py --seeds 42), così il vettore non è
+giudicato sugli stessi episodi su cui è stato addestrato.
+
+scelta dell'iterazione DAgger (dentro un run, automatica):
+- a ogni iterazione il vettore si riaddestra su tutto il dataset (stati della specialista + stati visitati da alpha
+  con il vettore, etichettati dalla specialista) e alpha con il vettore cammina nelle situazioni della famiglia;
+- migliore = più successi, a pari successi meno cadute. Non solo le cadute: in salita alpha resta ferma invece di
+  cadere, e con le sole cadute tutte le iterazioni risultavano uguali (prova breve su slope_up);
+- stop dopo 2 iterazioni (patience) senza un'iterazione migliore, al massimo 6; adapter.pt = la migliore.
+
+scelta del layer (tra i run h1, h2, h3, all; piano, fase 3 passo 2): la configurazione che imita meglio la
+specialista, valutata sul seme 42 (vantaggio recuperato su successi e cadute, distanza dalle azioni della specialista).
+
+FASE 3, PASSO 2: PRIMA DISTILLAZIONE, slope_down SU h2 (RISULTATI PRELIMINARI, SEME 0)
+comando: python scripts/train.py distill --situation slope_down --layer h2
+-> runs/20261104-1840_train_distill_alpha_walking+const_h2_slope_down (curves.csv, adapter.pt = iterazione 5)
+specialista: runs/20261104-1840_evaluate_slope_down-20261027-2240-it400_dagger; alpha: runs/20261028-1239_evaluate_alpha_walking_all
+(20 situazioni face_*_downhill e pyramid_*, 20 episodi, seme 0 = lo stesso dei dati di training)
+
+iterazioni DAgger (400 episodi ciascuna):
+  iterazione  passi nel dataset  mse      successi  cadute
+  0             400.000          0,0037   257       87
+  1             745.162          0,0041   330       51
+  2           1.111.112          0,0042   341       59
+  3           1.475.113          0,0043   348       52
+  4           1.844.677          0,0043   354       46
+  5           2.219.778          0,0043   367       32
+
+confronto:              successi   cadute
+  alpha_walking         125        275
+  specialista it400     400        0
+  alpha + v (it5)       367        32
+- vantaggio recuperato sui successi: (367 - 125) / (400 - 125) = 88%;
+- da 3° a 8° (face e pyramid) uguale alla specialista (1 caduta su face_8deg); le cadute restano sulle pendenze più
+  ripide: face_10deg_downhill 14, face_9deg_downhill 7, pyramid_9deg 6, pyramid_10deg 4;
+- il ciclo si è fermato per max_iterations (6), non per patience: successi e cadute miglioravano ancora;
+- l'mse sale perché il dataset si riempie degli stati difficili visitati da alpha + v, non perché il fit peggiori.
+da fare: valutazione sul seme 42; valutare se aumentare max_iterations prima degli altri layer.

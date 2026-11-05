@@ -1,4 +1,4 @@
-"""Train the components of the method (REPO_STRUCTURE.md, section 5). Phase 2: `ppo`; phase 3: `sae`.
+"""Train the components of the method (REPO_STRUCTURE.md, section 5). Phase 2: `ppo`; phase 3: `sae`, `distill`.
 
 `ppo --situation <family>` fine-tunes a specialist policy with PPO on one family of configs/training.yaml,
 starting from alpha_walking's training checkpoint (actor and critic). Writes runs/<YYYYMMDD-HHMM>_train_ppo_<family>/:
@@ -9,11 +9,17 @@ tensorboard logs. `--situation all` trains every family, one after the other.
 recorded in the run (section `sae` of configs/training.yaml). Writes runs/<YYYYMMDD-HHMM>_train_sae_<layer>/:
 config.yaml, run.json, log.txt, sae.pt, features.csv (a name for each dictionary element) and probes.csv.
 
+`distill --situation <s> --layer <h1|h2|h3|all>` distils the constant steering vector of a specialist with DAgger
+(section `distill`). Writes runs/<YYYYMMDD-HHMM>_train_distill_<base>+const_<layer>_<s>/: config.yaml, run.json,
+log.txt, adapter_it<k>.pt per iteration, adapter.pt (most successes, then fewest falls) and curves.csv; every rollout
+is an evaluation run of its own.
+
 Examples:
     python scripts/train.py ppo --situation slope_down
     python scripts/train.py ppo --situation all --num-envs 3072
     python scripts/train.py ppo --situation slope_down --num-envs 32 --finetune-iterations 2
     python scripts/train.py sae --run 20261028-1239_evaluate_alpha_walking_all
+    python scripts/train.py distill --situation slope_down --layer h2
 """
 from __future__ import annotations
 
@@ -38,6 +44,11 @@ def parse_args():
     ppo.add_argument("--device", help="cuda:0, cpu... (default: cuda:0 if available)")
     sae = commands.add_parser("sae", help="SAE and linear probes on the activations of an evaluation run")
     sae.add_argument("--run", required=True, help="evaluation run recorded with the activations")
+    distill = commands.add_parser("distill", help="distil the constant steering vector of a specialist with DAgger")
+    distill.add_argument("--situation", required=True, help="a key of distill.specialists in training.yaml")
+    distill.add_argument("--layer", required=True, choices=["h1", "h2", "h3", "all"])
+    distill.add_argument("--episodes", type=int, help="episodes per situation of the rollouts (default: eval.yaml's)")
+    distill.add_argument("--workers", type=int, help="parallel processes of the rollouts (default: eval.yaml's)")
     return p.parse_args()
 
 
@@ -88,10 +99,42 @@ def train_sae(args):
              f"{conf['layer']}: {{type: sae, base: {conf['controller']}, run: {run_dir.name}}}` and evaluate it")
 
 
+def train_distill(args):
+    """Phase 3, step 2: the constant steering vector of one specialist on one layer (or all three), with DAgger."""
+    import shutil
+    from steerduck import distill
+    from steerduck.policy import resolve
+    conf = config.load_yaml(config.CONFIGS / "training.yaml")["distill"]
+    if args.situation not in conf["specialists"]:
+        raise SystemExit(f"unknown situation {args.situation!r}; known: {', '.join(conf['specialists'])}")
+    specialist = conf["specialists"][args.situation]
+    ev = config.load_yaml(config.CONFIGS / "eval.yaml") | {"record_steps": True, "record_activations": False,
+                                                           "video": False}
+    ev |= {k: v for k, v in {"episodes_per_situation": args.episodes, "workers": args.workers}.items() if v}
+    situations = config.select_situations(ev["suite"], specialist["only"])
+    name = f"{conf['base']}+const_{args.layer}_{args.situation}"
+    run_dir = config.new_run("train_distill", name)
+    config.setup_logging(run_dir / "log.txt")
+    config.save_yaml({"situation": args.situation, "layer": args.layer, "distill": conf, "eval": ev,
+                      "situations": [s["name"] for s in situations]}, run_dir / "config.yaml")
+    config.write_manifest(run_dir, status="running")
+
+    curves, best = distill.distill(conf, ev, resolve(conf["base"]), resolve(specialist["controller"]), args.layer,
+                                   situations, name, run_dir)
+    curves.to_csv(run_dir / "curves.csv", index=False, float_format="%.5g")
+    shutil.copy(run_dir / f"adapter_it{best}.pt", run_dir / "adapter.pt")
+    config.write_manifest(run_dir, status="done", best_iteration=best, successes=int(curves.successes[best]),
+                          falls=int(curves.falls[best]))
+    log.info(f"{curves.to_string(index=False)}\nbest iteration {best} -> {run_dir}\nadd to configs/policies.yaml: "
+             f"`{name}: {{type: adapter, base: {conf['base']}, run: {run_dir.name}}}` and evaluate it with --seeds")
+
+
 def main():
     args = parse_args()
     if args.command == "sae":
         return train_sae(args)
+    if args.command == "distill":
+        return train_distill(args)
     import torch
 
     ppo = config.load_yaml(config.CONFIGS / "training.yaml")["ppo"]
