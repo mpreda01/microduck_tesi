@@ -68,7 +68,7 @@ distill:
   specialists:                     # the controller to imitate (policies.yaml) and its situations (names or patterns)
     slope_down: {controller: slope_down-20261027-2240-it400, only: ["face_*_downhill", "pyramid_*"]}
     slope_up: {controller: slope_up-20261028-0021-it300, only: ["face_*_uphill", "pit_*"]}
-  max_iterations: 6                # DAgger iterations at most
+  max_iterations: 10                # DAgger iterations at most
   patience: 2                      # stop after this many iterations not better than the best (successes, then falls)
   epochs: 5                        # passes over the whole dataset in each iteration
   batch_size: 4096

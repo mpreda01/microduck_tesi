@@ -476,3 +476,72 @@ confronto:              successi   cadute
 - il ciclo si è fermato per max_iterations (6), non per patience: successi e cadute miglioravano ancora;
 - l'mse sale perché il dataset si riempie degli stati difficili visitati da alpha + v, non perché il fit peggiori.
 da fare: valutazione sul seme 42; valutare se aumentare max_iterations prima degli altri layer.
+
+FASE 3, PASSO 2: slope_down SU h2 CON max_iterations 10, E SU h1 (SEME 0)
+h2: runs/20261105-1400_train_distill_alpha_walking+const_h2_slope_down
+- iterazioni 0-5 identiche al run precedente (distillazione deterministica con seed 0);
+- iterazione 6: 366 successi, 34 cadute; iterazione 7: 367, 33; mse 0,00431 -> 0,00429;
+- stop per patience (6 e 7 non migliori della 5), dopo 8 iterazioni: il vettore costante su h2 converge a circa
+  367/400. Migliore = iterazione 5, come prima.
+
+h1: runs/20261105-1630_train_distill_alpha_walking+const_h1_slope_down
+  iterazione  passi nel dataset  mse      successi  cadute
+  0             400.000          0,0027   383       17
+  1             792.086          0,0024   391       9
+  2           1.188.054          0,0020   397       3
+  3           1.586.750          0,0018   397       3
+  4           1.985.472          0,0017   400       0
+  5           2.385.472          0,0015   398       2
+  6           2.784.169          0,0015   399       1
+- migliore = iterazione 4: 400/400, 0 cadute, come la specialista; vantaggio recuperato 100% (h2: 88%). Le
+  iterazioni 4-6 sono equivalenti (differenze di 1-2 episodi). Stop per patience;
+- già l'iterazione 0 (solo stati della specialista) batte la migliore di h2 (383/17 contro 367/32);
+- l'mse scende mentre il dataset cresce (su h2 saliva): su h1 il vettore imita la specialista anche negli stati
+  difficili aggiunti da DAgger.
+
+perché h1 > h2: v si somma dopo la ELU e il layer successivo è lineare, quindi v su un layer equivale a una
+costante W v sommata prima della ELU del layer dopo.
+- v su h1 = costante prima della ELU di h2 (256 numeri), poi due non linearità: l'effetto sulle azioni cambia con
+  lo stato;
+- v su h2 = costante prima della ELU di h3 (128 numeri), una sola non linearità;
+- v su h3 = costante sommata alle azioni (spostamento fisso dei giunti).
+Più il vettore è vicino all'input, più la correzione è ricca. Attesa: h3 il peggiore, all poco meglio di h1.
+
+cautele: seme 0 (lo stesso del training e della scelta dell'iterazione), conferma sul seme 42; contro la
+specialista (anche lei 400/400) restano distanza dalle azioni, velocità e potenza; un vettore su h1 può cambiare
+la camminata anche fuori dalla discesa: valutare anche flat (prova di steering, piano sezione 3.5). Se h1 vince anche
+su slope_up il SAE va rifatto su h1, con nuova verifica in simulazione.
+da fare: slope_down h3 e all; slope_up h1, h2, h3, all; valutazione sul seme 42 con flat.
+
+FASE 3, PASSO 2: slope_down SU h3 (SEME 0)
+h3: runs/20261105-1735_train_distill_alpha_walking+const_h3_slope_down
+  iterazione  passi nel dataset  mse      successi  cadute
+  0             400.000          0,0050   358       42
+  1             774.701          0,0064   353       47
+  2           1.146.540          0,0070   343       57
+- migliore = iterazione 0, cioè il vettore addestrato solo sugli stati della specialista (behaviour cloning, senza
+  DAgger); poi successi, cadute e mse peggiorano. Stop per patience dopo 3 iterazioni.
+
+confronto su slope_down (seme 0, iterazione migliore):
+  layer  iterazione  successi  cadute  vantaggio recuperato
+  h1     4           400       0       100%
+  h2     5           367       32      88%
+  h3     0           358       42      85%
+  alpha  -           125       275     -
+- h2 e h3 sono quasi alla pari: cadute 8% contro 10,5%, intervalli di Wilson al 95% sovrapposti con 400 episodi.
+  h1 è nettamente migliore. Ordine h1 > h2 ≈ h3, come atteso.
+
+considerazioni:
+- v su h3 = spostamento fisso della posizione dei giunti, uguale in ogni istante. Sugli stati della specialista basta
+  già a correggere molto: l'iterazione 0 di h3 batte quella di h2 (358 contro 257 successi). Probabilmente la
+  differenza principale tra specialista e alpha in discesa è una postura media diversa (ipotesi, da verificare
+  guardando il vettore come azione: quali giunti sposta).
+- DAgger aggiunge gli stati difficili visitati da alpha + v, dove la specialista fa correzioni che cambiano con lo
+  stato. Uno spostamento fisso non le può riprodurre: il fit fa una media tra stati diversi e peggiora anche dove
+  prima andava bene (l'mse sale, i successi scendono).
+- è lo stesso schema di h2, più marcato: meno la correzione dipende dallo stato, meno DAgger la aiuta (su h1 l'mse
+  scende a ogni iterazione). Mostra il limite del vettore costante che il piano (sezione 3.3) usa per motivare LoRA
+  di rango 1 e la piccola rete.
+- per h3 la patience 2 ha fermato il ciclo presto, ma con una tendenza netta al peggioramento: più iterazioni non
+  avrebbero cambiato la scelta.
+da fare: slope_down all; slope_up h1, h2, h3, all; valutazione sul seme 42 con flat.
